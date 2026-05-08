@@ -389,8 +389,11 @@ export function OnboardingFlow({ initialStep = 0, initialParsed = null }: { init
                 </div>
               ) : analysisError ? (
                 <div style={{ padding: 16, background: "var(--bg-soft)", borderRadius: 8, marginBottom: 16, textAlign: "center" }}>
-                  <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 10 }}>
-                    AI 服務目前過載，{retryCountdown > 0 ? `${retryCountdown} 秒後自動重試…` : "重試中…"}
+                  <div style={{ color: "#ef4444", fontSize: 13, marginBottom: 6 }}>
+                    分析失敗 {retryCountdown > 0 ? `— ${retryCountdown} 秒後自動重試` : ""}
+                  </div>
+                  <div style={{ color: "var(--ink-3)", fontSize: 11, marginBottom: 10, fontFamily: "var(--font-mono)" }}>
+                    {analysisError}
                   </div>
                   <button className="btn primary" onClick={() => parsed && runAnalysis(parsed)}>
                     立即重試
