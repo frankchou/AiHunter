@@ -11,17 +11,30 @@ export interface ParsedResume {
   experience: {
     title: string;
     company: string;
+    startDate: string;
+    endDate: string;
     years: string;
     location: string;
     bullets?: string[];
   }[];
-  education?: { degree: string; school: string; year: string }[];
+  education?: { degree: string; school: string; startYear?: string; year: string; major?: string }[];
+  certifications?: string[];
+  awards?: string[];
   languages?: string[];
+}
+
+export interface ResumeAnalysis {
+  score: number;
+  keywords: string[];
+  swot: { S: string[]; W: string[]; O: string[]; T: string[] };
+  suggestions: { field: string; suggestion: string }[];
+  comment: string;
 }
 
 export interface JobPreference {
   locations: string[];
   salaryMin: number;
+  salaryMax: number | null;
   salaryCcy: string;
   industries: string[];
   employment: string[];

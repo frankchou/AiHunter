@@ -4,14 +4,15 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 const DEFAULT_PREFS = {
-  locations: ["Taipei", "Remote"],
-  salaryMin: 2_400_000,
+  locations: [],
+  salaryMin: 0,
+  salaryMax: null,
   salaryCcy: "TWD",
-  industries: ["tech.saas", "ai"],
-  employment: ["ft"],
-  remote: ["hybrid", "remote"],
-  languages: ["zh-TW", "en"],
-  titles: "Senior PM, Growth PM",
+  industries: [],
+  employment: [],
+  remote: [],
+  languages: [],
+  titles: "",
 };
 
 export async function GET() {

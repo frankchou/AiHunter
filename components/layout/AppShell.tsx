@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
@@ -16,7 +16,13 @@ const NAV = [
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [sideOpen, setSideOpen] = useState(false);
   const [accountMenu, setAccountMenu] = useState(false);
-  const { data: session } = useSession();
+  const { data: session, status } = useSession();
+
+  useEffect(() => {
+    if (status === "unauthenticated") {
+      signOut({ callbackUrl: "/login" });
+    }
+  }, [status]);
   const pathname = usePathname();
 
   const currentNav = NAV.find((n) => pathname.startsWith(n.href));

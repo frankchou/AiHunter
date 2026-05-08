@@ -1,7 +1,7 @@
 "use client";
 import { useState, useRef, useCallback } from "react";
 import useSWR from "swr";
-import { INDUSTRIES } from "@/lib/mock-data";
+import { INDUSTRIES, WORLD_LOCATIONS } from "@/lib/mock-data";
 import type { ParsedResume } from "@/lib/types";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
@@ -9,6 +9,7 @@ const fetcher = (url: string) => fetch(url).then((r) => r.json());
 interface PrefState {
   locations: string[];
   salaryMin: number;
+  salaryMax: number | null;
   salaryCcy: string;
   industries: string[];
   remote: string[];
@@ -29,10 +30,21 @@ export function ResumeView() {
     window.open("/api/resume/download", "_blank");
   }, []);
 
+  const [locationInput, setLocationInput] = useState("");
+
   const activePref = prefs ?? prefData ?? {
-    locations: [], salaryMin: 0, salaryCcy: "TWD", industries: [],
+    locations: [], salaryMin: 0, salaryMax: null, salaryCcy: "TWD", industries: [],
     remote: [], languages: [], titles: "",
   };
+
+  const addLocation = (loc: string) => {
+    const trimmed = loc.trim();
+    if (!trimmed || activePref.locations.includes(trimmed)) return;
+    setPrefs({ ...activePref, locations: [...activePref.locations, trimmed] });
+    setLocationInput("");
+  };
+  const removeLocation = (loc: string) =>
+    setPrefs({ ...activePref, locations: activePref.locations.filter((l) => l !== loc) });
 
   const togglePref = (key: keyof PrefState, val: string) => {
     const cur = (activePref[key] as string[]) ?? [];
@@ -208,36 +220,83 @@ export function ResumeView() {
             偏好變更後，職缺流立即重新計算 AI 推薦適合度。
           </p>
 
-          {[
-            { label: "工作地區", key: "locations" as const, options: ["Taipei","Tokyo","Singapore","San Francisco","New York","London","Berlin","Sydney","Remote"] },
-            { label: "遠端型態", key: "remote" as const, options: ["onsite","hybrid","remote"] },
-            { label: "期望產業", key: "industries" as const, options: INDUSTRIES.map((i) => i.id), labels: Object.fromEntries(INDUSTRIES.map((i) => [i.id, i.name])) },
-            { label: "語言", key: "languages" as const, options: ["zh-TW","zh-CN","en","ja","ko","de","es","fr"] },
-          ].map(({ label, key, options, labels }) => (
-            <div key={key} style={{ marginBottom: 14 }}>
-              <h4 style={{ fontSize: 12, fontFamily: "var(--font-mono)", textTransform: "uppercase", color: "var(--ink-3)", margin: "0 0 6px", letterSpacing: ".06em" }}>{label}</h4>
+          {/* Locations */}
+          <div style={{ marginBottom: 14 }}>
+            <h4 style={{ fontSize: 12, fontFamily: "var(--font-mono)", textTransform: "uppercase", color: "var(--ink-3)", margin: "0 0 6px", letterSpacing: ".06em" }}>工作地區</h4>
+            <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+              <input
+                type="text"
+                value={locationInput}
+                onChange={(e) => setLocationInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addLocation(locationInput); } }}
+                placeholder="輸入城市或國家，Enter 加入"
+                list="pref-loc-suggestions"
+                style={{ flex: 1, padding: "7px 10px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--bg)", fontFamily: "inherit", fontSize: 13 }}
+              />
+              <button className="btn" onClick={() => addLocation(locationInput)}>+</button>
+            </div>
+            <datalist id="pref-loc-suggestions">
+              {WORLD_LOCATIONS.filter(l => l.toLowerCase().includes(locationInput.toLowerCase())).map(l => <option key={l} value={l} />)}
+            </datalist>
+            {activePref.locations.length > 0 && (
               <div className="chips">
-                {options.map((v) => (
-                  <span key={v} className={`chip${hasPref(key, v) ? " active" : ""}`}
-                        onClick={() => togglePref(key, v)}>
-                    {(labels as Record<string, string> | undefined)?.[v] ?? v}
-                  </span>
+                {activePref.locations.map(l => (
+                  <span key={l} className="chip active" onClick={() => removeLocation(l)}>{l} ✕</span>
                 ))}
               </div>
+            )}
+            <div className="chips" style={{ marginTop: 6 }}>
+              {WORLD_LOCATIONS.filter(l => !activePref.locations.includes(l)).slice(0, 12).map(l => (
+                <span key={l} className="chip" onClick={() => addLocation(l)}>{l}</span>
+              ))}
             </div>
-          ))}
+          </div>
 
-          <h4 style={{ fontSize: 12, fontFamily: "var(--font-mono)", textTransform: "uppercase", color: "var(--ink-3)", margin: "0 0 6px", letterSpacing: ".06em" }}>期望薪資 (年)</h4>
+          {/* Remote */}
+          <div style={{ marginBottom: 14 }}>
+            <h4 style={{ fontSize: 12, fontFamily: "var(--font-mono)", textTransform: "uppercase", color: "var(--ink-3)", margin: "0 0 6px", letterSpacing: ".06em" }}>遠端型態</h4>
+            <div className="chips">
+              {["onsite", "hybrid", "remote"].map(v => (
+                <span key={v} className={`chip${hasPref("remote", v) ? " active" : ""}`} onClick={() => togglePref("remote", v)}>{v}</span>
+              ))}
+            </div>
+          </div>
+
+          {/* Industries */}
+          <div style={{ marginBottom: 14 }}>
+            <h4 style={{ fontSize: 12, fontFamily: "var(--font-mono)", textTransform: "uppercase", color: "var(--ink-3)", margin: "0 0 6px", letterSpacing: ".06em" }}>期望產業</h4>
+            <div className="chips" style={{ maxHeight: 120, overflowY: "auto" }}>
+              {INDUSTRIES.map(ind => (
+                <span key={ind.id} className={`chip${hasPref("industries", ind.id) ? " active" : ""}`} onClick={() => togglePref("industries", ind.id)}>{ind.name}</span>
+              ))}
+            </div>
+          </div>
+
+          {/* Languages */}
+          <div style={{ marginBottom: 14 }}>
+            <h4 style={{ fontSize: 12, fontFamily: "var(--font-mono)", textTransform: "uppercase", color: "var(--ink-3)", margin: "0 0 6px", letterSpacing: ".06em" }}>語言</h4>
+            <div className="chips">
+              {["zh-TW","zh-CN","en","ja","ko","de","es","fr"].map(v => (
+                <span key={v} className={`chip${hasPref("languages", v) ? " active" : ""}`} onClick={() => togglePref("languages", v)}>{v}</span>
+              ))}
+            </div>
+          </div>
+
+          {/* Salary range */}
+          <h4 style={{ fontSize: 12, fontFamily: "var(--font-mono)", textTransform: "uppercase", color: "var(--ink-3)", margin: "0 0 6px", letterSpacing: ".06em" }}>期望薪資範圍（年薪）</h4>
           <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 14 }}>
-            <input type="number" value={activePref.salaryMin}
+            <input type="number" placeholder="最低" value={activePref.salaryMin || ""}
                    onChange={(e) => setPrefs({ ...activePref, salaryMin: +e.target.value })}
+                   style={{ flex: 1, padding: "6px 10px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--bg)", fontFamily: "inherit", fontSize: 13 }} />
+            <span style={{ color: "var(--ink-3)", fontSize: 12 }}>—</span>
+            <input type="number" placeholder="最高" value={activePref.salaryMax ?? ""}
+                   onChange={(e) => setPrefs({ ...activePref, salaryMax: e.target.value ? +e.target.value : null })}
                    style={{ flex: 1, padding: "6px 10px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--bg)", fontFamily: "inherit", fontSize: 13 }} />
             <select value={activePref.salaryCcy}
                     onChange={(e) => setPrefs({ ...activePref, salaryCcy: e.target.value })}
                     className="sort-select">
-              {["TWD","USD","JPY","EUR","GBP","SGD","AUD"].map((c) => <option key={c} value={c}>{c}</option>)}
+              {["TWD","USD","JPY","EUR","GBP","SGD","AUD","HKD","KRW"].map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
-            <span style={{ color: "var(--ink-3)", fontSize: 12 }}>以上</span>
           </div>
 
           <h4 style={{ fontSize: 12, fontFamily: "var(--font-mono)", textTransform: "uppercase", color: "var(--ink-3)", margin: "0 0 6px", letterSpacing: ".06em" }}>期望職稱關鍵字</h4>

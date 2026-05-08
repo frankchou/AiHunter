@@ -381,12 +381,76 @@ export const INDUSTRY_TOP100: Record<string, IndustryCompany[]> = {
 // ─── Industry list ────────────────────────────────────────────────────────────
 
 export const INDUSTRIES = [
-  { id: "tech.saas", name: "SaaS / B2B Software" },
-  { id: "tech.consumer", name: "Consumer Tech" },
+  // Tech
+  { id: "ai", name: "AI / 機器學習" },
+  { id: "tech.saas", name: "SaaS / B2B 軟體" },
+  { id: "tech.consumer", name: "消費科技" },
+  { id: "tech.infra", name: "雲端 / 基礎設施" },
+  { id: "tech.security", name: "資安" },
+  { id: "tech.blockchain", name: "區塊鏈 / Web3" },
+  { id: "gaming", name: "遊戲" },
+  { id: "semiconductor", name: "半導體 / 晶片" },
+  { id: "hardware", name: "硬體 / IoT" },
+  // Finance
   { id: "fintech", name: "Fintech" },
-  { id: "ai", name: "AI / Infra" },
-  { id: "health", name: "Health Tech" },
-  { id: "retail", name: "Retail / E-commerce" },
+  { id: "banking", name: "銀行 / 金融" },
+  { id: "investment", name: "投資 / 資產管理" },
+  { id: "insurance", name: "保險" },
+  // Health
+  { id: "health", name: "醫療科技" },
+  { id: "pharma", name: "製藥 / 生技" },
+  { id: "medical", name: "醫院 / 醫療器材" },
+  // Commerce
+  { id: "retail", name: "零售 / 電商" },
+  { id: "fmcg", name: "快消品 / FMCG" },
+  { id: "fashion", name: "時尚 / 服飾" },
+  { id: "food", name: "餐飲 / 食品" },
+  { id: "travel", name: "旅遊 / 飯店" },
+  // Industry
+  { id: "aerospace", name: "航太 / 航空 / 國防" },
+  { id: "automotive", name: "汽車 / 電動車" },
+  { id: "manufacturing", name: "製造業" },
+  { id: "energy", name: "能源 / 再生能源" },
+  { id: "construction", name: "建設 / 地產" },
+  { id: "logistics", name: "物流 / 供應鏈" },
+  { id: "agriculture", name: "農業 / AgriTech" },
+  // Services
+  { id: "consulting", name: "顧問 / 管理" },
+  { id: "legal", name: "法律 / 法遵" },
+  { id: "education", name: "教育 / EdTech" },
+  { id: "media", name: "媒體 / 內容" },
+  { id: "advertising", name: "廣告 / 行銷" },
+  { id: "telecom", name: "電信" },
+  { id: "government", name: "政府 / 公共事務" },
+  { id: "ngo", name: "非營利 / NGO" },
+  { id: "sports", name: "體育 / 運動科技" },
+];
+
+export const WORLD_LOCATIONS = [
+  // 台灣
+  "台北", "新北", "桃園", "台中", "台南", "高雄", "新竹",
+  // 日本
+  "Tokyo", "Osaka", "Kyoto", "Fukuoka",
+  // 東南亞
+  "Singapore", "Bangkok", "Jakarta", "Kuala Lumpur", "Ho Chi Minh City", "Manila",
+  // 中國 / 香港
+  "Hong Kong", "Shanghai", "Beijing", "Shenzhen", "Guangzhou",
+  // 韓國
+  "Seoul", "Busan",
+  // 美國
+  "San Francisco", "New York", "Seattle", "Austin", "Los Angeles", "Boston", "Chicago", "Miami", "Denver",
+  // 歐洲
+  "London", "Berlin", "Amsterdam", "Paris", "Dublin", "Stockholm", "Zurich", "Barcelona", "Munich",
+  // 澳洲 / 紐西蘭
+  "Sydney", "Melbourne", "Auckland",
+  // 中東
+  "Dubai", "Tel Aviv",
+  // 加拿大
+  "Toronto", "Vancouver",
+  // 印度
+  "Bangalore", "Mumbai", "Hyderabad",
+  // 遠端
+  "Remote",
 ];
 
 export const JOB_SOURCES = [

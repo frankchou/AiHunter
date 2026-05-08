@@ -25,6 +25,7 @@ export async function POST(req: NextRequest) {
       ? {
           locations: prefs.locations,
           salaryMin: prefs.salaryMin,
+          salaryMax: (prefs as unknown as { salaryMax?: number | null }).salaryMax ?? null,
           salaryCcy: prefs.salaryCcy,
           industries: prefs.industries,
           employment: prefs.employment,
@@ -35,6 +36,7 @@ export async function POST(req: NextRequest) {
       : {
           locations: ["Taipei", "Remote"],
           salaryMin: 0,
+          salaryMax: null,
           salaryCcy: "TWD",
           industries: [],
           employment: ["ft"],
