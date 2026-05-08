@@ -5,6 +5,13 @@ import { Providers } from "./providers";
 export const metadata: Metadata = {
   title: "AI Hunter — 智能求職 Agent",
   description: "讓 AI Agent 為你掃描全球職缺，根據你的履歷和偏好自動匹配排序。",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "AI Hunter",
+  },
+  formatDetection: { telephone: false },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
