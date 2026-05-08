@@ -2,7 +2,7 @@
 import { useState, useRef, useCallback } from "react";
 import useSWR from "swr";
 import { INDUSTRIES, WORLD_LOCATIONS } from "@/lib/mock-data";
-import type { ParsedResume } from "@/lib/types";
+import type { ParsedResume, ResumeAnalysis } from "@/lib/types";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
@@ -106,6 +106,7 @@ export function ResumeView() {
   };
 
   const parsed: ParsedResume | null = resumeData?.parsed ?? null;
+  const analysis: ResumeAnalysis | null = resumeData?.analysis ?? null;
 
   return (
     <div className="app-content">
@@ -156,6 +157,42 @@ export function ResumeView() {
                   ))}
                 </div>
               </div>
+
+              {/* AI Analysis — SWOT */}
+              {analysis && (
+                <div style={{ marginTop: 20 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                    <div className="eyebrow">AI 履歷分析</div>
+                    <span className={`score-pill ${analysis.score >= 75 ? "high" : analysis.score >= 50 ? "mid" : "low"}`} style={{ fontSize: 11 }}>
+                      {analysis.score} 分
+                    </span>
+                  </div>
+
+                  {analysis.comment && (
+                    <p style={{ fontSize: 13, color: "var(--ink-2)", margin: "0 0 12px", lineHeight: 1.6 }}>{analysis.comment}</p>
+                  )}
+
+                  <div className="swot">
+                    <div className="quad S"><h4>優勢 S</h4><ul>{analysis.swot.S.map((s, i) => <li key={i}>{s}</li>)}</ul></div>
+                    <div className="quad W"><h4>弱點 W</h4><ul>{analysis.swot.W.map((s, i) => <li key={i}>{s}</li>)}</ul></div>
+                    <div className="quad O"><h4>機會 O</h4><ul>{analysis.swot.O.map((s, i) => <li key={i}>{s}</li>)}</ul></div>
+                    <div className="quad T"><h4>威脅 T</h4><ul>{analysis.swot.T.map((s, i) => <li key={i}>{s}</li>)}</ul></div>
+                  </div>
+
+                  {analysis.suggestions?.length > 0 && (
+                    <div style={{ marginTop: 14 }}>
+                      <div className="eyebrow" style={{ marginBottom: 6 }}>改善建議</div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                        {analysis.suggestions.map((s, i) => (
+                          <div key={i} style={{ fontSize: 13, color: "var(--ink-2)", padding: "6px 10px", background: "var(--bg-soft)", borderRadius: 6 }}>
+                            <span style={{ fontWeight: 600, color: "var(--ink)", marginRight: 6 }}>{s.field}:</span>{s.suggestion}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {parsed.experience.length > 0 && (
                 <div style={{ marginTop: 18 }}>
