@@ -105,11 +105,15 @@ export function OnboardingFlow({ initialStep = 0, initialParsed = null, initialA
     setPrefs({ ...prefs, locations: prefs.locations.filter((l) => l !== loc) });
 
   const saveStep = async (completedStep: number, data?: object) => {
-    await fetch("/api/onboarding", {
+    const r = await fetch("/api/onboarding", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ step: completedStep, data }),
     });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.error ?? `saveStep failed (HTTP ${r.status})`);
+    }
   };
 
   const parseFile = async (file: File) => {
@@ -186,9 +190,12 @@ export function OnboardingFlow({ initialStep = 0, initialParsed = null, initialA
   };
 
   const savePrefsAndFinish = async () => {
-    // Step 2 完成：儲存偏好，整個 onboarding 完成
-    await saveStep(3, { prefs });
-    setStep(3);
+    try {
+      await saveStep(3, { prefs });
+      setStep(3);
+    } catch (e) {
+      alert(`儲存偏好失敗，請稍後重試。\n${e}`);
+    }
   };
 
   return (

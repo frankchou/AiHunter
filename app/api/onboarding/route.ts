@@ -20,10 +20,14 @@ export async function POST(req: NextRequest) {
 
       // Step 3: user finished preferences, save them
       if (step === 3 && data?.prefs) {
+        const prefs = {
+          employment: [],   // UI doesn't collect this yet, default to empty
+          ...data.prefs,
+        };
         await tx.preference.upsert({
           where: { userId: session.user.id },
-          create: { userId: session.user.id, ...data.prefs },
-          update: data.prefs,
+          create: { userId: session.user.id, ...prefs },
+          update: prefs,
         });
       }
     });
