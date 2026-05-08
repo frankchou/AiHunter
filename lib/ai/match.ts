@@ -3,6 +3,9 @@ import type { ParsedResume, JobPreference, Job } from "@/lib/types";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
+const SCORE_LIMIT = 25;    // max jobs to AI-score per crawl
+const CONCURRENCY = 5;     // parallel Claude calls
+
 interface MatchResult {
   score: number;
   reasons: string[];
@@ -18,6 +21,7 @@ export async function scoreJob(
   }
 
   const prompt = `You are a job-matching AI. Score how well this candidate fits the job.
+Treat Chinese and English skill names as equivalent (e.g. "機器學習"="Machine Learning", "前端"="Frontend").
 
 CANDIDATE RESUME:
 Name: ${resume.name}
@@ -50,13 +54,16 @@ Respond in JSON only:
 }`;
 
   const msg = await client.messages.create({
-    model: "claude-sonnet-4-6",
-    max_tokens: 256,
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 512,
     messages: [{ role: "user", content: prompt }],
   });
 
-  const text = (msg.content[0] as { type: string; text: string }).text.trim();
-  const json = text.startsWith("{") ? JSON.parse(text) : JSON.parse(text.slice(text.indexOf("{")));
+  const raw = (msg.content[0] as { type: string; text: string }).text;
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  if (start === -1 || end === -1) throw new Error("No JSON in response");
+  const json = JSON.parse(raw.slice(start, end + 1));
   return { score: Math.min(1, Math.max(0, json.score)), reasons: json.reasons ?? [] };
 }
 
@@ -65,14 +72,34 @@ export async function batchScoreJobs(
   resume: ParsedResume,
   prefs: JobPreference
 ): Promise<Job[]> {
-  const scored = await Promise.allSettled(
-    jobs.map(async (job) => {
-      const { score, reasons } = await scoreJob(job, resume, prefs);
-      return { ...job, score, matchReasons: reasons };
-    })
+  // Skip mocks; sort by date (newest first); cap at SCORE_LIMIT
+  const realJobs = jobs.filter((j) => !j.id.startsWith("mock_"));
+  const sorted = [...realJobs].sort((a, b) =>
+    (b.postedAt ?? "").localeCompare(a.postedAt ?? "")
   );
-  return scored
-    .filter((r) => r.status === "fulfilled")
-    .map((r) => (r as PromiseFulfilledResult<Job>).value)
-    .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  const toScore = sorted.slice(0, SCORE_LIMIT);
+  const skip = sorted.slice(SCORE_LIMIT).map((j) => ({ ...j, score: null, matchReasons: [] }));
+
+  // Score in batches of CONCURRENCY
+  const results: Job[] = [];
+  for (let i = 0; i < toScore.length; i += CONCURRENCY) {
+    const batch = toScore.slice(i, i + CONCURRENCY);
+    const settled = await Promise.allSettled(
+      batch.map(async (job) => {
+        const { score, reasons } = await scoreJob(job, resume, prefs);
+        return { ...job, score, matchReasons: reasons };
+      })
+    );
+    for (let idx = 0; idx < settled.length; idx++) {
+      const r = settled[idx];
+      if (r.status === "fulfilled") {
+        results.push(r.value);
+      } else {
+        console.warn("[batchScoreJobs] scoring failed for", batch[idx]?.title, "—", r.reason);
+        results.push({ ...batch[idx], score: null, matchReasons: [] });
+      }
+    }
+  }
+
+  return [...results, ...skip].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 }

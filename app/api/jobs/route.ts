@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
     const orderBy: Prisma.JobOrderByWithRelationInput =
       filters.sort === "date"   ? { postedAt: "desc" } :
       filters.sort === "salary" ? { salaryMax: "desc" } :
-      { score: "desc" };
+      { score: { sort: "desc", nulls: "last" } };
 
     const [total, jobs] = await Promise.all([
       prisma.job.count({ where: where as Prisma.JobWhereInput }),

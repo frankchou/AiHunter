@@ -9,6 +9,13 @@ interface Props {
   onSave: () => void;
 }
 
+function ScorePill({ score }: { score: number | null }) {
+  if (score == null) return <span className="score-pill pending" title="待 AI 評分">— 分</span>;
+  const pct = Math.round(score * 100);
+  const cls = pct >= 75 ? "high" : pct >= 50 ? "mid" : "low";
+  return <span className={`score-pill ${cls}`} title="AI 推薦適合度">{pct} 分</span>;
+}
+
 export function JobCard({ job, saved, onSave }: Props) {
   return (
     <div className="job-card">
@@ -34,9 +41,7 @@ export function JobCard({ job, saved, onSave }: Props) {
         </div>
       </div>
       <div className="job-side">
-        {job.score != null && (
-          <span className="score-pill" title="AI 推薦適合度">{Math.round(job.score * 100)}</span>
-        )}
+        <ScorePill score={job.score} />
         <button className={`btn star${saved ? " on" : ""}`} onClick={onSave}>
           {saved ? "★ 已收藏" : "☆ 收藏"}
         </button>

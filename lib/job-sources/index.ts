@@ -1,5 +1,4 @@
 import type { Job, JobPreference } from "@/lib/types";
-import { MOCK_JOBS } from "@/lib/mock-data";
 import { fetchRemotiveJobs } from "./remotive";
 import { fetchAdzunaJobs } from "./adzuna";
 import { fetch104Jobs } from "./taiwan-104";
@@ -23,10 +22,6 @@ export async function crawlJobs(
   const sources: string[] = [];
   const errors: string[] = [];
   const allJobs: Job[] = [];
-
-  // Always include mock data as baseline (filtered out before DB persist)
-  allJobs.push(...MOCK_JOBS);
-  sources.push("mock");
 
   // ── JSearch (LinkedIn / Indeed / Glassdoor aggregator) ─────────────────────
   // Build contextual queries: role + location, role + remote, etc.

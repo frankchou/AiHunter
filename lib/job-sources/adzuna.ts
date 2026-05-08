@@ -52,7 +52,6 @@ export async function fetchAdzunaJobs(
             app_key: appKey,
             results_per_page: 20,
             what: keywords,
-            content_type: "application/json",
           },
           timeout: 10_000,
         }

@@ -109,7 +109,11 @@ p{margin:10px 0;color:var(--ink-2)}
 .job-side{display:flex;flex-direction:column;align-items:flex-end;gap:8px}
 @media(max-width:700px){.job-side{align-items:flex-start;flex-direction:row;flex-wrap:wrap}}
 .match-reasons{font-size:12px;color:var(--ink-3);margin-top:6px;font-style:italic}
-.score-pill{font-family:var(--font-mono);font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;background:var(--accent-soft);color:var(--accent-ink);border:1px solid oklch(80% .05 235)}
+.score-pill{font-family:var(--font-mono);font-size:13px;font-weight:700;padding:4px 12px;border-radius:999px;border:1px solid transparent;min-width:52px;text-align:center}
+.score-pill.high{background:oklch(93% .12 145);color:oklch(35% .15 145);border-color:oklch(80% .12 145)}
+.score-pill.mid{background:oklch(93% .12 85);color:oklch(40% .15 75);border-color:oklch(82% .12 85)}
+.score-pill.low{background:oklch(92% .06 25);color:oklch(45% .12 25);border-color:oklch(80% .08 25)}
+.score-pill.pending{background:var(--bg);color:var(--ink-3);border-color:var(--line);font-weight:400}
 
 /* ─── Search / filter bar ────────────────────────────────────────────────────── */
 .search-row{display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap}

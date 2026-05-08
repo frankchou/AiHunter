@@ -21,7 +21,6 @@ export function JobFeed({ initialPrefs }: Props) {
   const [q, setQ] = useState("");
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [crawling, setCrawling] = useState(false);
-  const [crawlInfo, setCrawlInfo] = useState<string | null>(null);
   const autoCrawledRef = useRef(false);
 
   const queryString = useMemo(() => {
@@ -71,11 +70,8 @@ export function JobFeed({ initialPrefs }: Props) {
 
   const handleCrawl = async () => {
     setCrawling(true);
-    setCrawlInfo(null);
     try {
-      const r = await fetch("/api/crawl", { method: "POST" });
-      const d = await r.json();
-      setCrawlInfo(`已從 ${d.sources?.join(", ")} 抓取 ${d.total} 筆職缺`);
+      await fetch("/api/crawl", { method: "POST" });
       await mutate();
     } finally {
       setCrawling(false);
@@ -86,14 +82,6 @@ export function JobFeed({ initialPrefs }: Props) {
 
   return (
     <div className="app-content">
-      {/* Crawl info banner */}
-      {crawlInfo && (
-        <div className="banner">
-          <div className="pulse" />
-          <div>{crawlInfo}</div>
-        </div>
-      )}
-
       <div className="section-h">
         <h3>職缺流 — {total} 筆</h3>
         <span className="sub">AI 推薦適合度 高 → 低</span>
