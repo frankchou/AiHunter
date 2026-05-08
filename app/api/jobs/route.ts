@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { cultureKeysToPatterns } from "@/lib/culture-keywords";
 import type { JobFilters } from "@/lib/types";
 import type { Prisma } from "@prisma/client";
 
@@ -16,6 +17,7 @@ export async function GET(req: NextRequest) {
     remote: sp.getAll("remote"),
     industries: sp.getAll("industries"),
     sources: sp.getAll("sources"),
+    culture: sp.getAll("culture"),
     yearsMin: sp.get("yearsMin") ? Number(sp.get("yearsMin")) : undefined,
     yearsMax: sp.get("yearsMax") ? Number(sp.get("yearsMax")) : undefined,
     titles: sp.get("titles") ?? undefined,
@@ -30,6 +32,14 @@ export async function GET(req: NextRequest) {
     if (filters.remote?.length) where.remote = { in: filters.remote };
     if (filters.industries?.length) where.industry = { in: filters.industries };
     if (filters.sources?.length) where.source = { in: filters.sources };
+    if (filters.culture?.length) {
+      const patterns = cultureKeysToPatterns(filters.culture);
+      where.AND = patterns.map((p) => ({
+        description: { contains: p, mode: "insensitive" },
+      })).slice(0, 1); // match at least one pattern per selected culture key
+      // Use OR across all patterns
+      where.AND = [{ OR: patterns.map((p) => ({ description: { contains: p, mode: "insensitive" } })) }];
+    }
     if (filters.yearsMin) where.yearsMax = { gte: filters.yearsMin };
     if (filters.yearsMax) where.yearsMin = { lte: filters.yearsMax };
     if (filters.titles) where.title = { contains: filters.titles, mode: "insensitive" };

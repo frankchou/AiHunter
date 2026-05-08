@@ -2,23 +2,34 @@
 import { useState } from "react";
 import useSWR from "swr";
 import { INDUSTRIES } from "@/lib/mock-data";
-import type { IndustryCompany } from "@/lib/types";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
+
+interface RealCompany {
+  rank: number;
+  name: string;
+  ticker: string;
+  jobCount: number;
+  avgScore: number | null;
+  locations: string;
+  sampleTitles: string[];
+}
 
 export function IndustryView() {
   const [selectedIndustry, setSelectedIndustry] = useState(INDUSTRIES[0].id);
 
-  const { data: companies = [], isLoading } = useSWR<IndustryCompany[]>(
+  const { data, isLoading } = useSWR<{ companies: RealCompany[] }>(
     `/api/industries?industry=${selectedIndustry}`,
     fetcher
   );
+
+  const companies = data?.companies ?? [];
 
   return (
     <div className="app-content">
       <div className="section-h">
         <h3>產業 Top 100</h3>
-        <span className="sub">AI 彙整各產業頂尖雇主，點擊查看詳情</span>
+        <span className="sub">依 AI 適配分數排序的頂尖雇主</span>
       </div>
 
       <div className="chips" style={{ marginBottom: 16 }}>
@@ -34,14 +45,12 @@ export function IndustryView() {
       </div>
 
       {isLoading && (
-        <div style={{ textAlign: "center", padding: 40 }}>
-          <div className="spinner" />
-        </div>
+        <div style={{ textAlign: "center", padding: 40 }}><div className="spinner" /></div>
       )}
 
       {!isLoading && companies.length === 0 && (
         <div className="card" style={{ textAlign: "center", color: "var(--ink-3)", padding: 40 }}>
-          此產業暫無資料
+          此產業暫無職缺資料，請先更新職缺
         </div>
       )}
 
@@ -52,15 +61,15 @@ export function IndustryView() {
               <tr>
                 <th>#</th>
                 <th>公司</th>
-                <th>優點</th>
-                <th>缺點</th>
-                <th>股票</th>
-                <th>近況</th>
+                <th>職缺數</th>
+                <th>平均適配</th>
+                <th>地點</th>
+                <th>代表職缺</th>
               </tr>
             </thead>
             <tbody>
-              {companies.map((c, i) => (
-                <CompanyRow key={c.name} rank={i + 1} company={c} />
+              {companies.map((c) => (
+                <CompanyRow key={c.name} company={c} />
               ))}
             </tbody>
           </table>
@@ -70,91 +79,45 @@ export function IndustryView() {
   );
 }
 
-function CompanyRow({ rank, company }: { rank: number; company: IndustryCompany }) {
+function CompanyRow({ company: c }: { company: RealCompany }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
     <>
-      <tr
-        className="company-row"
-        onClick={() => setExpanded((e) => !e)}
-        style={{ cursor: "pointer" }}
-      >
-        <td style={{ fontFamily: "var(--font-mono)", color: "var(--ink-3)", fontSize: 12 }}>
-          {rank}
-        </td>
+      <tr className="company-row" onClick={() => setExpanded((e) => !e)} style={{ cursor: "pointer" }}>
+        <td style={{ fontFamily: "var(--font-mono)", color: "var(--ink-3)", fontSize: 12 }}>{c.rank}</td>
         <td>
-          <div style={{ fontWeight: 600 }}>{company.name}</div>
-          {company.ticker && (
-            <div style={{ fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
-              {company.ticker}
-            </div>
+          <div style={{ fontWeight: 600 }}>{c.name}</div>
+          {c.ticker && c.ticker !== "—" && (
+            <div style={{ fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>{c.ticker}</div>
           )}
         </td>
+        <td style={{ fontFamily: "var(--font-mono)", fontSize: 13 }}>{c.jobCount}</td>
+        <td>
+          {c.avgScore != null ? (
+            <span className={`score-pill ${c.avgScore >= 75 ? "high" : c.avgScore >= 50 ? "mid" : "low"}`} style={{ fontSize: 11 }}>
+              {c.avgScore} 分
+            </span>
+          ) : <span style={{ color: "var(--ink-4)" }}>—</span>}
+        </td>
+        <td style={{ fontSize: 12, color: "var(--ink-2)" }}>{c.locations}</td>
         <td>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-            {company.pros.slice(0, 2).map((p, i) => (
-              <span key={i} className="tag good" style={{ fontSize: 10 }}>{p}</span>
+            {c.sampleTitles.slice(0, 2).map((t, i) => (
+              <span key={i} className="tag" style={{ fontSize: 10 }}>{t}</span>
             ))}
-            {company.pros.length > 2 && (
-              <span style={{ fontSize: 10, color: "var(--ink-3)" }}>+{company.pros.length - 2}</span>
-            )}
           </div>
-        </td>
-        <td>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-            {company.cons.slice(0, 2).map((c, i) => (
-              <span key={i} className="tag warn" style={{ fontSize: 10 }}>{c}</span>
-            ))}
-            {company.cons.length > 2 && (
-              <span style={{ fontSize: 10, color: "var(--ink-3)" }}>+{company.cons.length - 2}</span>
-            )}
-          </div>
-        </td>
-        <td>
-          {company.ticker ? (
-            <span
-              className={`tag ${(company.d1 ?? 0) > 0 ? "good" : (company.d1 ?? 0) < 0 ? "bad" : ""}`}
-              style={{ fontSize: 11, fontFamily: "var(--font-mono)" }}
-            >
-              {(company.d1 ?? 0) > 0 ? "↑" : (company.d1 ?? 0) < 0 ? "↓" : "→"}{" "}
-              {company.ticker}
-            </span>
-          ) : (
-            <span style={{ color: "var(--ink-4)", fontSize: 11 }}>—</span>
-          )}
-        </td>
-        <td style={{ fontSize: 12, color: "var(--ink-2)", maxWidth: 200 }}>
-          {company.trend ? (
-            <span style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-              {company.trend}
-            </span>
-          ) : "—"}
         </td>
       </tr>
       {expanded && (
         <tr>
           <td colSpan={6} style={{ background: "var(--bg-soft)", padding: "12px 16px" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, fontSize: 13 }}>
-              <div>
-                <div className="eyebrow" style={{ marginBottom: 6 }}>優點</div>
-                <ul style={{ margin: 0, paddingLeft: 16 }}>
-                  {company.pros.map((p, i) => <li key={i}>{p}</li>)}
-                </ul>
-              </div>
-              <div>
-                <div className="eyebrow" style={{ marginBottom: 6 }}>缺點</div>
-                <ul style={{ margin: 0, paddingLeft: 16 }}>
-                  {company.cons.map((c, i) => <li key={i}>{c}</li>)}
-                </ul>
+            <div style={{ fontSize: 13, color: "var(--ink-2)" }}>
+              <div className="eyebrow" style={{ marginBottom: 6 }}>所有代表職缺</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {c.sampleTitles.map((t, i) => <span key={i} className="tag">{t}</span>)}
               </div>
             </div>
-            {company.profile && (
-              <div style={{ marginTop: 12 }}>
-                <div className="eyebrow" style={{ marginBottom: 4 }}>公司簡介</div>
-                <div style={{ fontSize: 13, color: "var(--ink-2)" }}>{company.profile}</div>
-              </div>
-            )}
           </td>
         </tr>
       )}

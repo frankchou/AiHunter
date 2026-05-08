@@ -130,6 +130,7 @@ export interface JobFilters {
   remote?: string[];
   industries?: string[];
   sources?: string[];
+  culture?: string[];
   yearsMin?: number;
   yearsMax?: number;
   titles?: string;

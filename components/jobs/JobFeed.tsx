@@ -15,12 +15,20 @@ interface Props {
 export function JobFeed({ initialPrefs }: Props) {
   const [filters, setFilters] = useState<JobFilters>({
     sort: "score", page: 1, pageSize: 10,
-    countries: [], remote: [], industries: [], sources: [],
+    countries: [], remote: [], industries: [], sources: [], culture: [],
   });
   const [showFilters, setShowFilters] = useState(false);
   const [q, setQ] = useState("");
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [crawling, setCrawling] = useState(false);
+
+  // Load saved IDs on mount so stars show correctly
+  useEffect(() => {
+    fetch("/api/saved").then((r) => r.json()).then((data: { jobId: string }[]) => {
+      if (Array.isArray(data)) setSavedIds(new Set(data.map((s) => s.jobId)));
+    }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const autoCrawledRef = useRef(false);
 
   const queryString = useMemo(() => {
@@ -43,6 +51,7 @@ export function JobFeed({ initialPrefs }: Props) {
   const activeFilterCount =
     (filters.countries?.length ?? 0) + (filters.remote?.length ?? 0) +
     (filters.industries?.length ?? 0) + (filters.sources?.length ?? 0) +
+    (filters.culture?.length ?? 0) +
     (filters.titles ? 1 : 0) + (filters.yearsMin ? 1 : 0) + (filters.yearsMax ? 1 : 0);
 
   const handleSave = useCallback(async (jobId: string) => {

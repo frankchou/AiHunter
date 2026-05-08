@@ -74,8 +74,10 @@ export async function batchScoreJobs(
 ): Promise<Job[]> {
   // Skip mocks; sort by date (newest first); cap at SCORE_LIMIT
   const realJobs = jobs.filter((j) => !j.id.startsWith("mock_"));
+  const toIso = (d: Date | string | null | undefined) =>
+    d ? (typeof d === "string" ? d : d.toISOString()) : "";
   const sorted = [...realJobs].sort((a, b) =>
-    (b.postedAt ?? "").localeCompare(a.postedAt ?? "")
+    toIso(b.postedAt).localeCompare(toIso(a.postedAt))
   );
   const toScore = sorted.slice(0, SCORE_LIMIT);
   const skip = sorted.slice(SCORE_LIMIT).map((j) => ({ ...j, score: null, matchReasons: [] }));

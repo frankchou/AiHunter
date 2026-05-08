@@ -76,9 +76,22 @@ export function JobDetail({ job }: { job: Job }) {
             <span className="tag good">原始連結</span>
           </div>
 
+          {/* AI match analysis */}
+          {job.score != null && job.matchReasons.length > 0 && (
+            <div style={{ marginTop: 14, background: "oklch(95% .04 235)", border: "1px solid oklch(85% .06 235)", borderRadius: 8, padding: 14 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "oklch(45% .1 235)", marginBottom: 8, textTransform: "uppercase" }}>AI 適配分析</div>
+              <ul style={{ margin: 0, padding: "0 0 0 16px", fontSize: 13, color: "var(--ink-2)", lineHeight: 1.7 }}>
+                {job.matchReasons.map((r, i) => <li key={i}>{r}</li>)}
+              </ul>
+            </div>
+          )}
+
           {/* Job description */}
-          <div style={{ marginTop: 14, background: "var(--bg-soft)", borderRadius: 8, padding: 14, fontSize: 13, color: "var(--ink-2)", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>
-            {job.description}
+          <div style={{ marginTop: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "var(--ink-3)", marginBottom: 6, textTransform: "uppercase" }}>職缺描述 JD</div>
+            <div style={{ background: "var(--bg-soft)", borderRadius: 8, padding: 14, fontSize: 13, color: "var(--ink-2)", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>
+              {job.description || "（無職缺描述）"}
+            </div>
           </div>
 
           <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap" }}>

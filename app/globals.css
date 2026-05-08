@@ -75,6 +75,7 @@ p{margin:10px 0;color:var(--ink-2)}
 
 /* ─── Tags / chips ───────────────────────────────────────────────────────────── */
 .tag{display:inline-flex;align-items:center;gap:6px;padding:2px 8px;border:1px solid var(--line-2);border-radius:999px;font-family:var(--font-mono);font-size:10.5px;color:var(--ink-3);background:var(--bg-elev);text-transform:uppercase;letter-spacing:.06em}
+.tag.culture{background:oklch(93% .08 160);color:oklch(38% .12 160);border-color:oklch(80% .1 160);text-transform:none;letter-spacing:0}
 .tag.accent{border-color:var(--accent);color:var(--accent-ink);background:var(--accent-soft)}
 .tag.good{border-color:oklch(78% .1 155);color:oklch(36% .12 155);background:var(--good-soft)}
 .chip{font-size:12px;padding:4px 10px;border-radius:999px;border:1px solid var(--line-2);background:var(--bg);color:var(--ink-2);cursor:pointer;display:inline-block}

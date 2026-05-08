@@ -1,5 +1,6 @@
 "use client";
 import { INDUSTRIES, JOB_SOURCES } from "@/lib/mock-data";
+import { CULTURE_TAGS } from "@/lib/culture-keywords";
 import type { JobFilters } from "@/lib/types";
 
 interface Props {
@@ -81,6 +82,18 @@ export function FilterBar({ filters, onChange }: Props) {
               {JOB_SOURCES.map((s) => (
                 <span key={s.id} className={`chip${has("sources", s.id) ? " active" : ""}`}
                       onClick={() => toggle("sources", s.id)}>{s.name}</span>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="row" style={{ marginTop: 10 }}>
+          <div className="col" style={{ flex: "1 1 100%" }}>
+            <span className="filter-label">企業文化</span>
+            <div className="chips">
+              {CULTURE_TAGS.map((t) => (
+                <span key={t.key} className={`chip${has("culture", t.key) ? " active" : ""}`}
+                      onClick={() => toggle("culture", t.key)}>{t.label}</span>
               ))}
             </div>
           </div>

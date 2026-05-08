@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { fmtSalary, sourceHost, relativeTime } from "@/lib/utils";
+import { extractCultureTags } from "@/lib/culture-keywords";
 import type { Job } from "@/lib/types";
 
 interface Props {
@@ -17,6 +18,8 @@ function ScorePill({ score }: { score: number | null }) {
 }
 
 export function JobCard({ job, saved, onSave }: Props) {
+  const cultureTags = extractCultureTags(job.description ?? "");
+
   return (
     <div className="job-card">
       <div>
@@ -33,15 +36,20 @@ export function JobCard({ job, saved, onSave }: Props) {
           <span>🕐 {relativeTime(job.postedAt ?? null)}</span>
         </div>
         {job.matchReasons.length > 0 && (
-          <div className="match-reasons">AI 推薦: {job.matchReasons.slice(0, 3).join(" · ")}</div>
+          <div className="match-reasons">AI 推薦: {job.matchReasons.slice(0, 2).join(" · ")}</div>
         )}
         <div className="job-tags">
           {job.skills.slice(0, 5).map((s) => <span key={s} className="tag">{s}</span>)}
           <span className="tag accent">來源: {sourceHost(job.sourceUrl)}</span>
         </div>
+        {cultureTags.length > 0 && (
+          <div className="job-tags" style={{ marginTop: 4 }}>
+            {cultureTags.map((t) => <span key={t} className="tag culture">{t}</span>)}
+          </div>
+        )}
       </div>
       <div className="job-side">
-        <ScorePill score={job.score} />
+        <ScorePill score={job.score ?? null} />
         <button className={`btn star${saved ? " on" : ""}`} onClick={onSave}>
           {saved ? "★ 已收藏" : "☆ 收藏"}
         </button>
