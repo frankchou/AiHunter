@@ -1,5 +1,5 @@
 "use client";
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import useSWR from "swr";
 import { JobCard } from "./JobCard";
 import { FilterBar } from "./FilterBar";
@@ -22,6 +22,7 @@ export function JobFeed({ initialPrefs }: Props) {
   const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [crawling, setCrawling] = useState(false);
   const [crawlInfo, setCrawlInfo] = useState<string | null>(null);
+  const autoCrawledRef = useRef(false);
 
   const queryString = useMemo(() => {
     const combined: Record<string, unknown> = { ...filters, q: q || undefined };
@@ -58,6 +59,15 @@ export function JobFeed({ initialPrefs }: Props) {
       body: JSON.stringify({ jobId }),
     });
   }, [savedIds]);
+
+  // Auto-crawl once when feed is empty after first load
+  useEffect(() => {
+    if (!isLoading && total === 0 && !autoCrawledRef.current) {
+      autoCrawledRef.current = true;
+      handleCrawl();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading, total]);
 
   const handleCrawl = async () => {
     setCrawling(true);

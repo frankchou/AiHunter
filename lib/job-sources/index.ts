@@ -39,14 +39,12 @@ export async function crawlJobs(
     }
   }
 
-  // Remotive (remote)
-  if (prefs.remote.includes("remote") || prefs.remote.includes("hybrid")) {
-    try {
-      const jobs = await fetchRemotiveJobs(keywords.slice(0, 2));
-      if (jobs.length > 0) { allJobs.push(...jobs); sources.push("remotive"); }
-    } catch (e) {
-      errors.push(`remotive: ${(e as Error).message}`);
-    }
+  // Remotive — always run as baseline source
+  try {
+    const jobs = await fetchRemotiveJobs(keywords.slice(0, 2));
+    if (jobs.length > 0) { allJobs.push(...jobs); sources.push("remotive"); }
+  } catch (e) {
+    errors.push(`remotive: ${(e as Error).message}`);
   }
 
   // Adzuna
