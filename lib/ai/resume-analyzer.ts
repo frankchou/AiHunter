@@ -63,39 +63,27 @@ export async function analyzeResume(parsed: ParsedResume): Promise<ResumeAnalysi
 
   const resumeText = buildResumeSummary(parsed);
 
-  const prompt = `你是一位資深獵頭與職涯顧問，擁有 15 年審閱履歷的經驗。請對以下履歷進行專業分析。
+  const prompt = `你是資深獵頭，請分析以下履歷並回傳 JSON。
 
-重要規則：
-1. 評分基於「履歷品質與市場競爭力」，不是「欄位有沒有填」。以下資料都已存在，不要建議補上已有的資料。
-2. 分析要針對這份履歷的實際內容，不要給泛用建議。
-3. 建議要具體、可操作，例如「第二段工作的成果缺乏數字，建議加入減少 X% 的具體數字」。
-4. 關鍵字：從履歷中抽取 6-10 個最能代表此人的關鍵字，中文+英文翻譯一起給，格式例如：「專案管理 / Project Management」。
-5. SWOT 要針對此人的職涯，不要講廢話。
-6. 評分標準：85+ 是市場上非常具競爭力的履歷；70-84 是好履歷；55-69 需要改善；54 以下才是有嚴重缺失。
+規則：
+1. 評分看「品質與競爭力」，不是「欄位齊不齊」。
+2. 針對實際內容分析，不給泛用建議。
+3. 關鍵字抽 6-8 個，格式：「中文 / English」。
+4. SWOT 每項 2 條，每條 15 字以內。
+5. suggestions 最多 3 條，每條 suggestion 30 字以內。
+6. comment 最多 2 句。
+7. 評分：85+=非常競爭；70-84=好；55-69=需改善；<55=有缺失。
 
-履歷內容：
+履歷：
 ${resumeText}
 
-回傳純 JSON，不要 markdown：
-{
-  "score": <integer 0-100>,
-  "keywords": ["中文關鍵字 / English Keyword", ...],
-  "swot": {
-    "S": ["針對此人的具體優勢1", "優勢2", "優勢3"],
-    "W": ["具體可改善的弱點1", "弱點2"],
-    "O": ["市場機會1（基於此人背景）", "機會2"],
-    "T": ["競爭威脅1", "威脅2"]
-  },
-  "suggestions": [
-    {"field": "具體段落或欄位名稱", "suggestion": "具體改善建議"}
-  ],
-  "comment": "2-3句繁體中文總評，誠實但鼓勵，點出最大亮點與一個核心改善方向"
-}`;
+只回傳 JSON，不要 markdown：
+{"score":<0-100>,"keywords":["中文/English"],"swot":{"S":["優勢1","優勢2"],"W":["弱點1","弱點2"],"O":["機會1","機會2"],"T":["威脅1","威脅2"]},"suggestions":[{"field":"欄位","suggestion":"建議"}],"comment":"總評"}`;
 
   try {
     const msg = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 2048,
+      max_tokens: 4096,
       messages: [{ role: "user", content: prompt }],
     });
 
