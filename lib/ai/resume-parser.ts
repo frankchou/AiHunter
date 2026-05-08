@@ -96,7 +96,7 @@ Return ONLY valid JSON, no markdown, no explanation. Use this exact schema:
 
   try {
     const msg = await client.messages.create({
-      model: "claude-sonnet-4-6",
+      model: "claude-3-5-sonnet-20241022",
       max_tokens: 8192,
       messages: [{ role: "user", content: prompt }],
     });
