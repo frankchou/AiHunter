@@ -22,6 +22,7 @@ export function ResumeView() {
   const { data: prefData, mutate: mutatePrefs } = useSWR<PrefState>("/api/preferences", fetcher);
   const [prefs, setPrefs] = useState<PrefState | null>(null);
   const [parsing, setParsing] = useState(false);
+  const [analyzing, setAnalyzing] = useState(false);
   const [text, setText] = useState("");
   const [showRaw, setShowRaw] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -63,6 +64,20 @@ export function ResumeView() {
     mutatePrefs();
   };
 
+  const runAnalysis = async (parsed: ParsedResume) => {
+    setAnalyzing(true);
+    try {
+      await fetch("/api/resume/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ parsed }),
+      });
+      await mutateResume();
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
   const parseAndSave = async (rawText: string, fileName?: string) => {
     setParsing(true);
     try {
@@ -77,8 +92,9 @@ export function ResumeView() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rawText, parsed, fileName }),
       });
-      mutateResume();
-    } finally {
+      setParsing(false);
+      await runAnalysis(parsed);
+    } catch {
       setParsing(false);
     }
   };
@@ -96,12 +112,12 @@ export function ResumeView() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ rawText, parsed, fileName, fileData, fileMime }),
       });
-      mutateResume();
+      setParsing(false);
+      await runAnalysis(parsed);
     } catch (e) {
       console.error(e);
-      alert("解析失敗，請確認檔案格式或稍後再試。");
-    } finally {
       setParsing(false);
+      alert("解析失敗，請確認檔案格式或稍後再試。");
     }
   };
 
@@ -136,14 +152,16 @@ export function ResumeView() {
             </>
           )}
 
-          {parsing && (
+          {(parsing || analyzing) && (
             <div style={{ textAlign: "center", padding: 32 }}>
               <div className="spinner" style={{ margin: "0 auto 12px" }} />
-              <div className="eyebrow">Agent 解析中… 抽取技能 / 年資 / 職稱 / 經歷</div>
+              <div className="eyebrow">
+                {parsing ? "Agent 解析中… 抽取技能 / 年資 / 職稱 / 經歷" : "AI 分析履歷中… 生成 SWOT"}
+              </div>
             </div>
           )}
 
-          {parsed && !parsing && (
+          {parsed && !parsing && !analyzing && (
             <>
               <div className="eyebrow">基本資訊 · 自動抽取</div>
               <div style={{ fontWeight: 600, fontSize: 18, marginTop: 6 }}>{parsed.name}</div>
