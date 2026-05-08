@@ -1,6 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import { getPlan, withinLimit, type PlanTier } from "@/lib/plans";
 
+// Owner account — always treated as Max, no limits, no usage tracking
+const OWNER_EMAIL = process.env.OWNER_EMAIL ?? "frank200231@gmail.com";
+
 type UsageKey = "analysisUsed" | "insightsUsed" | "cvTailorsUsed";
 type LimitKey = "resumeAnalysisPerMonth" | "insightsPerMonth" | "cvTailorsPerMonth";
 
@@ -16,9 +19,12 @@ export async function assertPlanLimit(
 ): Promise<void> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { planTier: true, usageMonth: true, analysisUsed: true, insightsUsed: true, cvTailorsUsed: true },
+    select: { email: true, planTier: true, usageMonth: true, analysisUsed: true, insightsUsed: true, cvTailorsUsed: true },
   });
   if (!user) throw new Error("User not found");
+
+  // Owner account bypasses all limits
+  if (user.email === OWNER_EMAIL) return;
 
   const plan = getPlan(user.planTier ?? "free");
   const month = currentMonth();
@@ -77,9 +83,12 @@ export async function canUseFeature(
 ): Promise<boolean> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
-    select: { planTier: true, usageMonth: true, analysisUsed: true, insightsUsed: true, cvTailorsUsed: true },
+    select: { email: true, planTier: true, usageMonth: true, analysisUsed: true, insightsUsed: true, cvTailorsUsed: true },
   });
   if (!user) return false;
+
+  // Owner account can use everything
+  if (user.email === OWNER_EMAIL) return true;
 
   const plan = getPlan(user.planTier ?? "free");
   const month = currentMonth();
