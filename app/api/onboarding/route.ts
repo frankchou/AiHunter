@@ -18,8 +18,8 @@ export async function POST(req: NextRequest) {
         data: { onboardingStep: step },
       });
 
-      // Step 2 completed: save preferences
-      if (step === 2 && data?.prefs) {
+      // Step 3: user finished preferences, save them
+      if (step === 3 && data?.prefs) {
         await tx.preference.upsert({
           where: { userId: session.user.id },
           create: { userId: session.user.id, ...data.prefs },
