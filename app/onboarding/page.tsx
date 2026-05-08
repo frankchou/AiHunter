@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { OnboardingFlow } from "@/components/onboarding/OnboardingFlow";
-import type { ParsedResume } from "@/lib/types";
+import type { ParsedResume, ResumeAnalysis } from "@/lib/types";
 
 export default async function OnboardingPage() {
   const session = await getServerSession(authOptions);
@@ -36,8 +36,9 @@ export default async function OnboardingPage() {
     if (resume && startStep < 1) startStep = 1; // has resume → at least confirmation step
 
     const parsed = resume ? (resume.parsed as unknown as ParsedResume) : null;
+    const cachedAnalysis = resume?.analysis ? (resume.analysis as unknown as ResumeAnalysis) : null;
 
-    return <OnboardingFlow initialStep={startStep} initialParsed={parsed} />;
+    return <OnboardingFlow initialStep={startStep} initialParsed={parsed} initialAnalysis={cachedAnalysis} />;
   } catch (e: unknown) {
     if (typeof e === "object" && e !== null && "digest" in e) throw e;
   }

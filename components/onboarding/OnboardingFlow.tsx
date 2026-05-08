@@ -8,14 +8,14 @@ import { ResumeEditor } from "./ResumeEditor";
 
 const STEPS = ["上傳履歷", "確認分析", "求職偏好", "完成"];
 
-export function OnboardingFlow({ initialStep = 0, initialParsed = null }: { initialStep?: number; initialParsed?: ParsedResume | null }) {
+export function OnboardingFlow({ initialStep = 0, initialParsed = null, initialAnalysis = null }: { initialStep?: number; initialParsed?: ParsedResume | null; initialAnalysis?: ResumeAnalysis | null }) {
   const router = useRouter();
   const { data: session } = useSession();
   const [step, setStep] = useState(initialStep);
   const [parsing, setParsing] = useState(false);
   const [parsed, setParsed] = useState<ParsedResume | null>(initialParsed);
   const [rawText, setRawText] = useState("");
-  const [analysis, setAnalysis] = useState<ResumeAnalysis | null>(null);
+  const [analysis, setAnalysis] = useState<ResumeAnalysis | null>(initialAnalysis);
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [retryCountdown, setRetryCountdown] = useState(0);
@@ -452,9 +452,9 @@ export function OnboardingFlow({ initialStep = 0, initialParsed = null }: { init
                   </div>
 
                   <div style={{ marginTop: 10, textAlign: "right" }}>
-                    <button className="btn" style={{ fontSize: 11 }} onClick={() => { setAnalysis(null); setAnalysisError(null); parsed && runAnalysis(parsed); }}>
-                      重新分析
-                    </button>
+                    <span style={{ fontSize: 11, color: "var(--ink-3)" }}>
+                      如需重新分析，請先編輯履歷內容
+                    </span>
                   </div>
                 </div>
               ) : null}

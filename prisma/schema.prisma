@@ -75,9 +75,11 @@ model Resume {
   fileName  String?
   fileData  String?  @db.Text  // base64 original file
   fileMime  String?            // MIME type for download
-  rawText   String   @db.Text
-  parsed    Json
-  isActive  Boolean  @default(true)
+  rawText     String   @db.Text
+  parsed      Json
+  parsedHash  String?            // md5-ish fingerprint of parsed content
+  analysis    Json?              // cached AI analysis result
+  isActive    Boolean  @default(true)
   createdAt DateTime @default(now())
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
