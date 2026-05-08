@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>AI Hunter · UI / UX Prototype</title>
+<link rel="stylesheet" href="shared.css" />
+<link rel="stylesheet" href="prototype.css" />
+</head>
+<body>
+<div id="app"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script src="prototype-data.js"></script>
+<script type="text/babel" src="prototype-base.jsx"></script>
+<script type="text/babel" src="prototype-feed.jsx"></script>
+<script type="text/babel" src="prototype-detail.jsx"></script>
+
+<script type="text/babel">
+const { useState: useStateApp } = React;
+
+function TopBackLink() {
+  return (
+    <div style={{ background: "var(--bg-soft)", borderBottom: "1px solid var(--line)", padding: "8px 18px", fontSize: 12, fontFamily: "var(--font-mono)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+      <span>UI / UX Prototype · 互動可點擊</span>
+      <a href="index.html">← 回到 spec hub</a>
+    </div>
+  );
+}
+
+function App() {
+  const [authed, setAuthed] = useStateApp(false);
+  const [hasResume, setHasResume] = useStateApp(false);
+  const [isReturning, setIsReturning] = useStateApp(false);
+  const [accountMenu, setAccountMenu] = useStateApp(false);
+  const [view, setView] = useStateApp("feed");
+  const [savedIds, setSavedIds] = useStateApp(new Set());
+  const [openedJob, setOpenedJob] = useStateApp(null);
+  const [sideOpen, setSideOpen] = useStateApp(false);
+  const [prefs, setPrefs] = useStateApp({
+    locations: ["Taipei", "Remote"],
+    salaryMin: 2400000, salaryCcy: "TWD",
+    industries: ["tech.saas", "ai"],
+    employment: ["ft"], remote: ["hybrid", "remote"],
+    languages: ["zh-TW", "en"],
+    titles: "Senior PM, Growth PM",
+  });
+
+  const toggleSave = (id) => {
+    setSavedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const handleLogin = (mode) => {
+    // mode: 'new' = 全新使用者 → 走 Onboarding;'returning' = 舊使用者 → 直接進職缺流
+    setAuthed(true);
+    if (mode === "returning") { setHasResume(true); setIsReturning(true); setView("feed"); }
+    else { setHasResume(false); setIsReturning(false); }
+  };
+  const handleLogout = () => {
+    setAuthed(false); setHasResume(false); setIsReturning(false);
+    setAccountMenu(false); setOpenedJob(null); setView("feed");
+  };
+
+  if (!authed) {
+    return (
+      <>
+        <TopBackLink />
+        <Login onLogin={handleLogin} />
+      </>
+    );
+  }
+  if (!hasResume) {
+    return (
+      <>
+        <TopBackLink />
+        <Onboarding onDone={(parsed, p) => { setPrefs(p); setHasResume(true); }} />
+      </>
+    );
+  }
+
+  const titles = {
+    feed: "職缺流", saved: "我的收藏", resume: "履歷",
+    industry: "產業 Top 100 公司", settings: "設定",
+  };
+
+  return (
+    <>
+      <TopBackLink />
+      <div className="app-shell">
+        <Sidebar view={view} setView={setView} sideOpen={sideOpen} setSideOpen={setSideOpen} />
+        <div className="app-main">
+          <div className="app-bar">
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <button className="menu-toggle" onClick={() => setSideOpen(o => !o)}>≡</button>
+              <span className="title">{openedJob ? "職缺詳情" : titles[view]}</span>
+            </div>
+            <div className="right" style={{ position: "relative" }}>
+              <span className="tag">{savedIds.size} 已收藏</span>
+              <button onClick={() => setAccountMenu(o => !o)} style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }} title="帳號">
+                <div className="avatar">{AH_DATA.user.avatar}</div>
+              </button>
+              {accountMenu && (
+                <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, background: "var(--bg-elev)", border: "1px solid var(--line)", borderRadius: 8, minWidth: 200, boxShadow: "0 8px 24px rgba(0,0,0,0.08)", zIndex: 50, overflow: "hidden" }}>
+                  <div style={{ padding: "10px 12px", borderBottom: "1px solid var(--line)", fontSize: 12 }}>
+                    <div style={{ fontWeight: 600 }}>{AH_DATA.user.name}</div>
+                    <div style={{ color: "var(--ink-3)" }}>{AH_DATA.user.email}</div>
+                  </div>
+                  <button onClick={() => { setView("settings"); setAccountMenu(false); }}
+                          style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 12px", background: "none", border: "none", fontFamily: "inherit", fontSize: 13, cursor: "pointer", color: "var(--ink)" }}>設定</button>
+                  <button onClick={handleLogout}
+                          style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 12px", background: "none", border: "none", borderTop: "1px solid var(--line)", fontFamily: "inherit", fontSize: 13, cursor: "pointer", color: "var(--ink)" }}>登出</button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {openedJob ? (
+            <JobDetail job={openedJob} savedIds={savedIds} toggleSave={toggleSave} onBack={() => setOpenedJob(null)} />
+          ) : view === "feed" ? (
+            <FeedView savedIds={savedIds} toggleSave={toggleSave} openJob={setOpenedJob} prefs={prefs} />
+          ) : view === "saved" ? (
+            <SavedView savedIds={savedIds} openJob={setOpenedJob} />
+          ) : view === "resume" ? (
+            <ResumeView prefs={prefs} setPrefs={setPrefs} />
+          ) : view === "industry" ? (
+            <IndustryView />
+          ) : (
+            <Settings onLogout={handleLogout} />
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("app")).render(<App />);
+</script>
+</body>
+</html>
