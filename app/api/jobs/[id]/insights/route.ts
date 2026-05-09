@@ -28,9 +28,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   // Check plan limits
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { planTier: true, insightsUsed: true, adUnlocksUsed: true, usageMonth: true },
+    select: { email: true, planTier: true, insightsUsed: true, adUnlocksUsed: true, usageMonth: true },
   });
-  if (user) {
+  const isOwner = user?.email === (process.env.OWNER_EMAIL ?? "frank200231@gmail.com");
+  if (user && !isOwner) {
     const plan = getPlan(user.planTier);
     const { allowed, remaining, resetNeeded } = checkLimit({
       used: user.insightsUsed,
