@@ -19,16 +19,16 @@ export function JobFeed({ initialPrefs }: Props) {
   });
   const [showFilters, setShowFilters] = useState(false);
   const [q, setQ] = useState("");
-  const [savedIds, setSavedIds] = useState<Set<string>>(new Set());
   const [crawling, setCrawling] = useState(false);
 
-  // Load saved IDs on mount so stars show correctly
-  useEffect(() => {
-    fetch("/api/saved").then((r) => r.json()).then((data: { jobId: string }[]) => {
-      if (Array.isArray(data)) setSavedIds(new Set(data.map((s) => s.jobId)));
-    }).catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // Shared SWR key with SavedBoard for bidirectional sync
+  const { data: savedList, mutate: mutateSaved } = useSWR<{ jobId: string }[]>(
+    "/api/saved",
+    fetcher,
+    { revalidateOnFocus: true }
+  );
+  const savedIds = useMemo(() => new Set((savedList ?? []).map((s) => s.jobId)), [savedList]);
+
   const autoCrawledRef = useRef(false);
 
   const queryString = useMemo(() => {
@@ -56,17 +56,21 @@ export function JobFeed({ initialPrefs }: Props) {
 
   const handleSave = useCallback(async (jobId: string) => {
     const isSaved = savedIds.has(jobId);
-    setSavedIds((prev) => {
-      const next = new Set(prev);
-      isSaved ? next.delete(jobId) : next.add(jobId);
-      return next;
-    });
+    // Optimistic update
+    mutateSaved(
+      (prev) => {
+        const list = prev ?? [];
+        return isSaved ? list.filter((s) => s.jobId !== jobId) : [...list, { jobId }];
+      },
+      { revalidate: false }
+    );
     await fetch("/api/saved", {
       method: isSaved ? "DELETE" : "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ jobId }),
     });
-  }, [savedIds]);
+    mutateSaved(); // sync server state after request
+  }, [savedIds, mutateSaved]);
 
   // Auto-crawl once when feed is empty after first load
   useEffect(() => {

@@ -41,6 +41,17 @@ export function SavedBoard() {
     mutate();
   };
 
+  const unsave = async (jobId: string) => {
+    // Optimistic remove
+    mutate((prev) => (prev ?? []).filter((s) => s.job.id !== jobId), { revalidate: false });
+    await fetch("/api/saved", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobId }),
+    });
+    mutate();
+  };
+
   if (isLoading) {
     return (
       <div className="app-content" style={{ textAlign: "center", padding: 60 }}>
@@ -101,7 +112,7 @@ export function SavedBoard() {
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 12, gap: 8 }}>
                     <ScoreBadge score={item.job.score} />
 
-                    <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
                       <a
                         href={item.job.sourceUrl}
                         target="_blank"
@@ -129,6 +140,14 @@ export function SavedBoard() {
                       >
                         {STAGES.map((st) => <option key={st.id} value={st.id}>{st.label}</option>)}
                       </select>
+                      <button
+                        className="btn star on"
+                        style={{ fontSize: 11, padding: "3px 8px" }}
+                        title="取消收藏"
+                        onClick={() => unsave(item.job.id)}
+                      >
+                        ★ 取消
+                      </button>
                     </div>
                   </div>
                 </div>

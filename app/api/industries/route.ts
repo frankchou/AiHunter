@@ -27,8 +27,8 @@ For each company provide honest, actionable info for job seekers. Respond in JSO
     {
       "rank": 1,
       "name": "Company Name",
-      "ticker": "TICKER or null",
-      "region": "US | TW | Global | APAC | EU",
+      "ticker": "Yahoo Finance ticker with exchange suffix for non-US: e.g. MSFT (US), 2330.TW (Taiwan), 005930.KS (Korea), 9984.T (Japan), 700.HK (HK). Use null for private companies.",
+      "region": "US | TW | Global | APAC | EU | KR | JP | HK",
       "pros": ["hiring culture pro 1 in zh-TW", "pro 2", "pro 3"],
       "cons": ["hiring culture con 1 in zh-TW", "con 2"],
       "profile": "2-sentence company profile for job seekers in zh-TW",
