@@ -11,7 +11,7 @@ const fetcher = (url: string) => fetch(url).then((r) => r.json());
 interface UserProfile {
   planTier: string;
   insightsUsed: number;
-  cvTailorsUsed: number;
+  analysisUsed: number;
   usageMonth: string | null;
   stripeCustomerId: string | null;
 }
@@ -26,9 +26,9 @@ export function SettingsView() {
   const month = currentMonth();
   const resetNeeded = profile?.usageMonth !== month;
   const insightsUsed = resetNeeded ? 0 : (profile?.insightsUsed ?? 0);
-  const cvUsed = resetNeeded ? 0 : (profile?.cvTailorsUsed ?? 0);
+  const analysisUsed = resetNeeded ? 0 : (profile?.analysisUsed ?? 0);
   const insightsLimit = plan.limits.insightsPerMonth;
-  const cvLimit = plan.limits.cvTailorsPerMonth;
+  const analysisLimit = plan.limits.analysisPerMonth;
 
   const handlePortal = async () => {
     const res = await fetch("/api/stripe/portal", { method: "POST" });
@@ -120,9 +120,9 @@ export function SettingsView() {
                   </div>
                 </div>
                 <div>
-                  <div style={{ color: "var(--ink-3)", fontSize: 11, marginBottom: 3 }}>CV 客製</div>
+                  <div style={{ color: "var(--ink-3)", fontSize: 11, marginBottom: 3 }}>履歷 + CV</div>
                   <div style={{ fontWeight: 600 }}>
-                    {cvUsed} / {cvLimit === null ? "∞" : cvLimit}
+                    {analysisUsed} / {analysisLimit === null ? "∞" : analysisLimit}
                     <span style={{ fontWeight: 400, color: "var(--ink-3)", fontSize: 11, marginLeft: 4 }}>次/月</span>
                   </div>
                 </div>

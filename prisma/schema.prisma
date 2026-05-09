@@ -70,7 +70,9 @@ model User {
   preferences     Preference?
   savedJobs       SavedJob[]
   insights        Insight[]
-  cvTailors       CVTailor[]
+  resumeTailors   ResumeTailor[]
+  coverLetters    CoverLetter[]
+  coverLetterTailors CoverLetterTailor[]
 }
 
 model Resume {
@@ -134,8 +136,9 @@ model Job {
   matchReasons    String[]
   scoreUpdatedAt  DateTime?    // AI score cache timestamp (24h TTL)
   savedBy      SavedJob[]
-  insights     Insight[]
-  cvTailors    CVTailor[]
+  insights        Insight[]
+  resumeTailors   ResumeTailor[]
+  coverLetterTailors CoverLetterTailor[]
 
   @@index([country, industry, remote])
   @@index([crawledAt])
@@ -174,10 +177,13 @@ model Insight {
   @@unique([userId, jobId])
 }
 
-model CVTailor {
+// B 針對性履歷（Max only）。原為 CVTailor，2026-05 改名以與 B CV 區分。
+model ResumeTailor {
   id        String   @id @default(cuid())
   userId    String
   jobId     String
+  fileName  String?           // English: Company_JobTitle_YYYY-MM-DD_Name_resume.pdf
+  isCurrent Boolean  @default(true) // true = latest version for this (user, job)
   summary   Json
   bullets   Json
   diffNote  String
@@ -186,7 +192,39 @@ model CVTailor {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, jobId])
+  @@index([userId, isCurrent])
+  @@index([userId, jobId, isCurrent])
+}
+
+// A CV（一般 cover letter，全 plan）
+model CoverLetter {
+  id        String   @id @default(cuid())
+  userId    String
+  version   Int      @default(1)
+  fileName  String?           // System-named: <UserName>_cv.pdf
+  content   String   @db.Text // free-form cover letter text
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isActive])
+}
+
+// B 針對性 CV（Max only）
+model CoverLetterTailor {
+  id        String   @id @default(cuid())
+  userId    String
+  jobId     String
+  fileName  String?           // English: Company_JobTitle_YYYY-MM-DD_Name_cv.pdf
+  isCurrent Boolean  @default(true)
+  content   String   @db.Text
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isCurrent])
+  @@index([userId, jobId, isCurrent])
 }
 
 model IndustryCache {

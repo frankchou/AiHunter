@@ -5,6 +5,7 @@ import { INDUSTRIES, WORLD_LOCATIONS } from "@/lib/mock-data";
 import { AdWatcher } from "@/components/subscription/AdWatcher";
 import { AD_UNLOCK_ENABLED } from "@/lib/plans";
 import type { ParsedResume, ResumeAnalysis } from "@/lib/types";
+import { CoverLetterCard } from "@/components/resume/CoverLetterCard";
 
 interface LimitInfo { planTier: string; tickets: number; adSessionsLeft: number }
 
@@ -443,6 +444,8 @@ export function ResumeView() {
           <button className="btn primary" onClick={savePref}>儲存偏好</button>
         </div>
       </div>
+
+      <CoverLetterCard />
     </div>
   );
 }

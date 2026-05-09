@@ -2,11 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { MOCK_JOBS, getMockCV } from "@/lib/mock-data";
-import { generateResumeTailor, buildTailoredFileName } from "@/lib/ai/resume-tailor";
+import { MOCK_JOBS } from "@/lib/mock-data";
+import { generateTailoredCoverLetter } from "@/lib/ai/cover-letter";
+import { buildTailoredFileName } from "@/lib/ai/resume-tailor";
 import type { ParsedResume, Job } from "@/lib/types";
 
-// 取得 user planTier + isSuperUser，Max-only 才放行（super user 也通行）
 async function ensureMaxOrSuper(userId: string) {
   const u = await prisma.user.findUnique({
     where: { id: userId },
@@ -21,7 +21,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   try {
-    const existing = await prisma.resumeTailor.findFirst({
+    const existing = await prisma.coverLetterTailor.findFirst({
       where: { userId: session.user.id, jobId: params.id, isCurrent: true },
       orderBy: { createdAt: "desc" },
     });
@@ -30,7 +30,7 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
   return NextResponse.json({ data: null });
 }
 
-export async function POST(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
@@ -38,7 +38,7 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
   if (!ok) {
     return NextResponse.json({
       error: "MAX_ONLY",
-      message: "針對性履歷為 Max 旗艦專屬功能",
+      message: "針對性 CV 為 Max 旗艦專屬功能",
       planTier: user?.planTier ?? "free",
     }, { status: 403 });
   }
@@ -55,52 +55,54 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
       where: { userId: session.user.id, isActive: true },
       orderBy: { createdAt: "desc" },
     });
+    const generalCv = await prisma.coverLetter.findFirst({
+      where: { userId: session.user.id, isActive: true },
+      orderBy: { createdAt: "desc" },
+    });
 
     const parsedResume: ParsedResume = resume
       ? (resume.parsed as unknown as ParsedResume)
       : { name: user?.name ?? session.user.name ?? "User", headline: "Professional", skills: [], experience: [] };
 
-    let cv;
-    try {
-      cv = await generateResumeTailor(job, parsedResume);
-    } catch {
-      cv = getMockCV(job.title, job.company);
+    // Allow user-provided draft override (when they edit AI output and re-save)
+    const body = await req.json().catch(() => ({}));
+    let content: string;
+    if (typeof body?.content === "string" && body.content.trim()) {
+      content = body.content.trim();
+    } else {
+      content = await generateTailoredCoverLetter(job, parsedResume, generalCv?.content ?? null);
     }
 
     const fileName = buildTailoredFileName({
-      company:   job.company,
-      jobTitle:  job.title,
-      userName:  user?.name ?? parsedResume.name ?? "User",
-      kind:      "resume",
+      company:  job.company,
+      jobTitle: job.title,
+      userName: user?.name ?? parsedResume.name ?? "User",
+      kind:     "cv",
     });
 
     try {
-      // Mark previous versions for this (user, job) as not current
-      await prisma.resumeTailor.updateMany({
+      await prisma.coverLetterTailor.updateMany({
         where: { userId: session.user.id, jobId: params.id, isCurrent: true },
         data:  { isCurrent: false },
       });
-      const saved = await prisma.resumeTailor.create({
+      const saved = await prisma.coverLetterTailor.create({
         data: {
           userId:    session.user.id,
           jobId:     params.id,
           fileName,
           isCurrent: true,
-          summary:   cv.summary,
-          bullets:   cv.bullets,
-          diffNote:  cv.diffNote,
+          content,
         },
       });
       return NextResponse.json(saved);
     } catch {
-      return NextResponse.json({ ...cv, id: "mock", userId: session.user.id, jobId: params.id, fileName });
+      return NextResponse.json({ id: "mock", content, fileName, userId: session.user.id, jobId: params.id });
     }
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
   }
 }
 
-// 刪除該職缺的所有針對性履歷版本（包含歷史）
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string } }) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -109,7 +111,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: { id: stri
   if (!ok) return NextResponse.json({ error: "MAX_ONLY" }, { status: 403 });
 
   try {
-    const result = await prisma.resumeTailor.deleteMany({
+    const result = await prisma.coverLetterTailor.deleteMany({
       where: { userId: session.user.id, jobId: params.id },
     });
     return NextResponse.json({ ok: true, deleted: result.count });

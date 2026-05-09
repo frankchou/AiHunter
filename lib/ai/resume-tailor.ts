@@ -4,7 +4,7 @@ import { getMockCV } from "@/lib/mock-data";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-export async function generateCVTailor(
+export async function generateResumeTailor(
   job: Job,
   resume: ParsedResume
 ): Promise<CVTailor> {
@@ -44,4 +44,30 @@ Provide 3-4 bullet rewrites. Keep all facts truthful to the original.`;
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}") + 1;
   return JSON.parse(text.slice(start, end)) as CVTailor;
+}
+
+/**
+ * Build the English filename for a tailored resume.
+ * Format: Company_JobTitle_YYYY-MM-DD_Name_resume.pdf
+ *
+ * Slug rules: ASCII-letters/digits kept, others → underscore. Used for both
+ * the resume and cover-letter tailored filenames so they line up visually.
+ */
+export function buildTailoredFileName(opts: {
+  company: string;
+  jobTitle: string;
+  userName: string;
+  kind: "resume" | "cv";
+  date?: Date;
+}): string {
+  const slug = (s: string) =>
+    s
+      .normalize("NFKD")
+      .replace(/[^\w\s-]/g, "")
+      .trim()
+      .replace(/\s+/g, "_")
+      .slice(0, 40) || "X";
+  const d = opts.date ?? new Date();
+  const yyyy_mm_dd = d.toISOString().slice(0, 10);
+  return `${slug(opts.company)}_${slug(opts.jobTitle)}_${yyyy_mm_dd}_${slug(opts.userName)}_${opts.kind}.pdf`;
 }

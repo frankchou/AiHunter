@@ -2,10 +2,9 @@ import { prisma } from "@/lib/prisma";
 import { getPlan, currentMonth, TICKET_COSTS, type BillAction } from "@/lib/plans";
 
 // Maps action → DB field that tracks its monthly usage
-const ACTION_FIELD: Partial<Record<BillAction, "insightsUsed" | "cvTailorsUsed" | "analysisUsed">> = {
+const ACTION_FIELD: Partial<Record<BillAction, "insightsUsed" | "analysisUsed">> = {
   insight:  "insightsUsed",
-  cv:       "cvTailorsUsed",
-  analysis: "analysisUsed",
+  analysis: "analysisUsed",   // shared counter: resume parse + analyze + general CV write/draft
   // industryRefresh has no counter: free=always tickets, pro/max=unlimited
 };
 
@@ -13,7 +12,6 @@ function getLimit(action: BillAction, tier: string): number | null {
   const plan = getPlan(tier);
   switch (action) {
     case "insight":         return plan.limits.insightsPerMonth;
-    case "cv":              return plan.limits.cvTailorsPerMonth;
     case "analysis":        return plan.limits.analysisPerMonth;
     case "industryRefresh": return plan.limits.industryRefreshPerMonth;
   }
@@ -36,7 +34,6 @@ export async function consumeUsage(userId: string, action: BillAction): Promise<
       planTier:      true,
       usageMonth:    true,
       insightsUsed:  true,
-      cvTailorsUsed: true,
       analysisUsed:  true,
       adTickets:     true,
       adUnlocksUsed: true,

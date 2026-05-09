@@ -1,9 +1,9 @@
 export type PlanTier = "free" | "pro" | "max";
 
 // ── Ticket costs per feature ─────────────────────────────────────────────────
+// CV Tailor (針對性履歷) is Max-only and not billed via tickets/quota — see canUseCVTailor()
 export const TICKET_COSTS = {
   insight:          1,
-  cv:               1,
   analysis:         1,  // resume parse + analyze (shared counter)
   industryRefresh:  3,
 } as const;
@@ -28,18 +28,18 @@ export const PLANS = {
     stripePriceId: null as string | null,
     limits: {
       insightsPerMonth:        3,
-      cvTailorsPerMonth:       1,
-      analysisPerMonth:        3,    // resume parse + analyze combined
+      analysisPerMonth:        3,    // shared: resume parse + analyze + general CV write/draft
       industryRefreshPerMonth: 0,    // always requires tickets for free
       adUnlock:                true,
+      tailoredDocuments:       false, // B 履歷 + B CV，Max only
+      versionFolder:           false, // 履歷版本夾，Max only
       mockInterview:           false,
       forceRefreshIndustry:    false,
     },
     features: [
       "職缺流瀏覽（無限）",
       "AI 深度分析 3 次 / 月",
-      "CV 客製 1 次 / 月",
-      "履歷解析 3 次 / 月",
+      "履歷解析 + CV 編寫 3 次 / 月（共用配額）",
       "看廣告獲得解析券（每月上限 5 次）",
     ],
   },
@@ -50,18 +50,18 @@ export const PLANS = {
     stripePriceId: process.env.STRIPE_PRO_PRICE_ID ?? null,
     limits: {
       insightsPerMonth:        30,
-      cvTailorsPerMonth:       15,
       analysisPerMonth:        15,
       industryRefreshPerMonth: null as number | null,  // unlimited
       adUnlock:                false,
+      tailoredDocuments:       false,
+      versionFolder:           false,
       mockInterview:           false,
       forceRefreshIndustry:    true,
     },
     features: [
       "AI 深度分析 30 次 / 月",
-      "CV 客製 15 次 / 月",
-      "履歷解析 15 次 / 月",
-      "產業 Top 100 強制更新",
+      "履歷解析 + CV 編寫 15 次 / 月（共用配額）",
+      "產業 Top 20 強制更新",
       "無廣告",
     ],
   },
@@ -72,17 +72,19 @@ export const PLANS = {
     stripePriceId: process.env.STRIPE_MAX_PRICE_ID ?? null,
     limits: {
       insightsPerMonth:        null as number | null,
-      cvTailorsPerMonth:       null as number | null,
       analysisPerMonth:        null as number | null,
       industryRefreshPerMonth: null as number | null,
       adUnlock:                false,
+      tailoredDocuments:       true,
+      versionFolder:           true,
       mockInterview:           true,
       forceRefreshIndustry:    true,
     },
     features: [
       "AI 深度分析無限次",
-      "CV 客製無限次",
-      "履歷解析無限次",
+      "履歷解析 + CV 編寫無限次",
+      "針對性履歷 + 針對性 CV（每職缺一份，無限產生）",
+      "履歷版本夾（集中管理所有版本）",
       "AI 模擬面試（即將推出）",
       "全功能優先使用",
     ],
@@ -95,6 +97,11 @@ export function getPlan(tier: string) {
 
 export function currentMonth(): string {
   return new Date().toISOString().slice(0, 7);
+}
+
+/** Convenience: is the user on the Max tier (or super user)? */
+export function isMaxTier(planTier: string | null | undefined): boolean {
+  return planTier === "max";
 }
 
 /**

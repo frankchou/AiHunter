@@ -11,22 +11,36 @@ const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 interface LimitInfo { planTier: string; tickets: number; adSessionsLeft: number }
 
+interface CoverLetterTailorRow {
+  id?: string;
+  fileName?: string;
+  content?: string;
+}
+
 export function JobDetail({ job }: { job: Job }) {
   const router = useRouter();
   const [saved, setSaved] = useState(false);
   const [generatingInsight, setGeneratingInsight] = useState(false);
-  const [generatingCV, setGeneratingCV] = useState(false);
-  const [tab, setTab] = useState<"overview" | "swot" | "risks" | "qa" | "cv">("overview");
+  const [generatingResumeT, setGeneratingResumeT] = useState(false);
+  const [generatingCvT,     setGeneratingCvT]     = useState(false);
+  const [tab, setTab] = useState<"overview" | "swot" | "risks" | "qa" | "tailor">("overview");
 
   const [insightLimit, setInsightLimit] = useState<LimitInfo | null>(null);
-  const [cvLimit, setCvLimit]           = useState<LimitInfo | null>(null);
-  const [adWatching, setAdWatching]     = useState<"insight" | "cv" | null>(null);
+  const [adWatching, setAdWatching]     = useState<"insight" | null>(null);
+
+  const { data: profile } = useSWR<{ planTier?: string; isSuperUser?: boolean }>(
+    "/api/user/profile", fetcher, { revalidateOnFocus: false }
+  );
+  const isMax = !!profile && (profile.isSuperUser || profile.planTier === "max");
 
   const { data: insightData, mutate: mutateInsight } = useSWR<Insight & { id?: string }>(
     `/api/jobs/${job.id}/insights`, fetcher, { revalidateOnFocus: false }
   );
-  const { data: cvData, mutate: mutateCV } = useSWR<CVTailor & { id?: string }>(
-    `/api/jobs/${job.id}/cv`, fetcher, { revalidateOnFocus: false }
+  const { data: resumeTailor, mutate: mutateResumeT } = useSWR<CVTailor & { id?: string; fileName?: string }>(
+    isMax ? `/api/jobs/${job.id}/cv` : null, fetcher, { revalidateOnFocus: false }
+  );
+  const { data: cvTailor, mutate: mutateCvT } = useSWR<CoverLetterTailorRow>(
+    isMax ? `/api/jobs/${job.id}/cover-letter` : null, fetcher, { revalidateOnFocus: false }
   );
   const { data: savedData } = useSWR<{ saved: boolean }>(
     `/api/saved/check?jobId=${job.id}`, fetcher, { revalidateOnFocus: false }
@@ -37,7 +51,8 @@ export function JobDetail({ job }: { job: Job }) {
   }, [savedData]);
 
   const insight: (Insight & { id?: string }) | null = insightData?.id ? insightData : null;
-  const cv: (CVTailor & { id?: string }) | null = cvData?.id ? cvData : null;
+  const tailoredResume: (CVTailor & { id?: string; fileName?: string }) | null = resumeTailor?.id ? resumeTailor : null;
+  const tailoredCv: CoverLetterTailorRow | null = cvTailor?.id ? cvTailor : null;
 
   const generateInsight = async () => {
     setGeneratingInsight(true);
@@ -56,20 +71,44 @@ export function JobDetail({ job }: { job: Job }) {
     }
   };
 
-  const generateCV = async () => {
-    setGeneratingCV(true);
-    setCvLimit(null);
+  const generateResumeTailor = async () => {
+    setGeneratingResumeT(true);
     try {
       const res = await fetch(`/api/jobs/${job.id}/cv`, { method: "POST" });
-      if (res.status === 402) {
-        const data = await res.json();
-        setCvLimit(data);
-        return;
-      }
-      await mutateCV(await res.json());
+      if (res.status === 403) { alert("針對性履歷為 Max 旗艦專屬"); return; }
+      if (!res.ok) { alert("產生失敗，請稍後再試"); return; }
+      await mutateResumeT(await res.json());
     } finally {
-      setGeneratingCV(false);
+      setGeneratingResumeT(false);
     }
+  };
+
+  const deleteResumeTailor = async () => {
+    if (!confirm("確定刪除這份針對性履歷？此動作會同時清除版本夾中的紀錄。")) return;
+    const res = await fetch(`/api/jobs/${job.id}/cv`, { method: "DELETE" });
+    if (res.ok) mutateResumeT(undefined as never, { revalidate: true });
+  };
+
+  const generateCvTailor = async (overrideContent?: string) => {
+    setGeneratingCvT(true);
+    try {
+      const res = await fetch(`/api/jobs/${job.id}/cover-letter`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(overrideContent ? { content: overrideContent } : {}),
+      });
+      if (res.status === 403) { alert("針對性 CV 為 Max 旗艦專屬"); return; }
+      if (!res.ok) { alert("產生失敗，請稍後再試"); return; }
+      await mutateCvT(await res.json());
+    } finally {
+      setGeneratingCvT(false);
+    }
+  };
+
+  const deleteCvTailor = async () => {
+    if (!confirm("確定刪除這份針對性 CV？此動作會同時清除版本夾中的紀錄。")) return;
+    const res = await fetch(`/api/jobs/${job.id}/cover-letter`, { method: "DELETE" });
+    if (res.ok) mutateCvT(undefined as never, { revalidate: true });
   };
 
   const handleSave = async () => {
@@ -131,7 +170,7 @@ export function JobDetail({ job }: { job: Job }) {
             ["swot", "SWOT 分析"],
             ["risks", "風險評估"],
             ["qa", "面試準備"],
-            ["cv", "CV 客製"],
+            ["tailor", "✨ 針對性履歷 + CV"],
           ] as const).map(([k, l]) => (
             <button key={k} className={`tab-btn${tab === k ? " active" : ""}`} onClick={() => setTab(k)}>{l}</button>
           ))}
@@ -265,41 +304,26 @@ export function JobDetail({ job }: { job: Job }) {
           </div>
         )}
 
-        {/* ── CV Tab ── */}
-        {tab === "cv" && (
+        {/* ── Tailor Tab (Max only): 針對性履歷 + 針對性 CV ── */}
+        {tab === "tailor" && (
           <div>
-            {!cv && (
-              <CVGate
-                loading={generatingCV} limit={cvLimit}
-                watching={adWatching === "cv"}
-                onGenerate={generateCV}
-                onWatchAd={() => setAdWatching("cv")}
-                onAdComplete={() => { setAdWatching(null); generateCV(); }}
-                onAdCancel={() => setAdWatching(null)}
-              />
-            )}
-            {cv && (
+            {!isMax && <MaxOnlyUpsell />}
+
+            {isMax && (
               <>
-                <div className="callout">{cv.diffNote}</div>
-                <div style={{ marginTop: 12 }}>
-                  <div className="eyebrow">Summary</div>
-                  <div className="diff-block">
-                    <div className="diff-side before"><div className="lbl">Before</div>{cv.summary.before}</div>
-                    <div className="diff-side after"><div className="lbl">After</div>{cv.summary.after}</div>
-                  </div>
-                </div>
-                {(cv.bullets as { before: string; after: string }[]).map((b, i) => (
-                  <div key={i} style={{ marginTop: 12 }}>
-                    <div className="eyebrow">Bullet {i + 1}</div>
-                    <div className="diff-block">
-                      <div className="diff-side before"><div className="lbl">Before</div>{b.before}</div>
-                      <div className="diff-side after"><div className="lbl">After</div>{b.after}</div>
-                    </div>
-                  </div>
-                ))}
-                <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
-                  <button className="btn primary" onClick={() => window.print()}>列印 / 下載 PDF</button>
-                </div>
+                <TailoredResumeSection
+                  data={tailoredResume}
+                  loading={generatingResumeT}
+                  onGenerate={generateResumeTailor}
+                  onDelete={deleteResumeTailor}
+                />
+                <div style={{ height: 28 }} />
+                <TailoredCvSection
+                  data={tailoredCv}
+                  loading={generatingCvT}
+                  onGenerate={generateCvTailor}
+                  onDelete={deleteCvTailor}
+                />
               </>
             )}
           </div>
@@ -392,19 +416,161 @@ function GeneratePrompt({ loading, limit, watching, onGenerate, onWatchAd, onAdC
   );
 }
 
-function CVGate({ loading, limit, watching, onGenerate, onWatchAd, onAdComplete, onAdCancel }: GateProps) {
-  if (limit) return (
-    <div style={{ marginBottom: 16 }}>
-      <LimitBanner limit={limit} watching={watching} ticketCost={1}
-        onWatchAd={onWatchAd} onAdComplete={onAdComplete} onAdCancel={onAdCancel} />
+// ── Tailor (Max only) sub-components ────────────────────────────────────────
+
+function MaxOnlyUpsell() {
+  return (
+    <div style={{ padding: 24, textAlign: "center", background: "var(--bg-soft)", borderRadius: 10, border: "1px dashed var(--line)" }}>
+      <div style={{ fontSize: 28, marginBottom: 8 }}>✨</div>
+      <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>針對性履歷 + 針對性 CV 為 Max 旗艦專屬</div>
+      <div style={{ fontSize: 13, color: "var(--ink-3)", marginBottom: 14, lineHeight: 1.6 }}>
+        AI 依此職缺的 JD、公司與你的履歷，重新撰寫一份專屬的履歷與 cover letter。<br />
+        所有產出自動收錄到你的「履歷版本」資料夾。
+      </div>
+      <a href="/pricing" className="btn primary" style={{ fontSize: 13 }}>🚀 升級 Max 解鎖</a>
     </div>
   );
+}
+
+function TailoredResumeSection({
+  data, loading, onGenerate, onDelete,
+}: {
+  data: (CVTailor & { id?: string; fileName?: string }) | null;
+  loading: boolean;
+  onGenerate: () => void;
+  onDelete: () => void;
+}) {
   return (
-    <div style={{ marginBottom: 16, padding: "14px 16px", background: "var(--bg-soft)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-      <div style={{ fontSize: 13, color: "var(--ink-2)" }}>根據此職缺 JD，AI 將協助客製化你的履歷摘要與重點</div>
-      <button className="btn primary" onClick={onGenerate} disabled={loading} style={{ whiteSpace: "nowrap" }}>
-        {loading ? <><span className="spinner" style={{ width: 12, height: 12 }} /> 生成中…</> : "生成 CV 客製版"}
-      </button>
+    <div>
+      <SectionHeader
+        title="針對性履歷"
+        fileName={data?.fileName}
+        loading={loading}
+        primaryLabel={data ? "重新產生" : "AI 撰寫"}
+        onPrimary={onGenerate}
+        onDelete={data ? onDelete : undefined}
+      />
+      {!data && !loading && (
+        <div style={{ padding: 16, fontSize: 13, color: "var(--ink-3)", background: "var(--bg-soft)", borderRadius: 8 }}>
+          尚未產生。AI 會根據此職缺的 JD 與你的履歷，產生 summary 與 bullets 的客製版本。
+        </div>
+      )}
+      {data && (
+        <>
+          <div className="callout">{data.diffNote}</div>
+          <div style={{ marginTop: 12 }}>
+            <div className="eyebrow">Summary</div>
+            <div className="diff-block">
+              <div className="diff-side before"><div className="lbl">Before</div>{data.summary.before}</div>
+              <div className="diff-side after"><div className="lbl">After</div>{data.summary.after}</div>
+            </div>
+          </div>
+          {(data.bullets as { before: string; after: string }[]).map((b, i) => (
+            <div key={i} style={{ marginTop: 12 }}>
+              <div className="eyebrow">Bullet {i + 1}</div>
+              <div className="diff-block">
+                <div className="diff-side before"><div className="lbl">Before</div>{b.before}</div>
+                <div className="diff-side after"><div className="lbl">After</div>{b.after}</div>
+              </div>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
+function TailoredCvSection({
+  data, loading, onGenerate, onDelete,
+}: {
+  data: { id?: string; fileName?: string; content?: string } | null;
+  loading: boolean;
+  onGenerate: (override?: string) => void;
+  onDelete: () => void;
+}) {
+  const [draft, setDraft] = useState<string>(data?.content ?? "");
+  const [editing, setEditing] = useState(false);
+
+  // Sync server -> draft when not actively editing
+  useEffect(() => {
+    if (!editing) setDraft(data?.content ?? "");
+  }, [data?.content, editing]);
+
+  const stale = !!data && draft !== data.content;
+
+  return (
+    <div>
+      <SectionHeader
+        title="針對性 CV (Cover Letter)"
+        fileName={data?.fileName}
+        loading={loading}
+        primaryLabel={data ? "AI 重新撰寫" : "AI 撰寫"}
+        onPrimary={() => onGenerate()}
+        onDelete={data ? onDelete : undefined}
+      />
+      {!data && !loading && (
+        <div style={{ padding: 16, fontSize: 13, color: "var(--ink-3)", background: "var(--bg-soft)", borderRadius: 8, marginBottom: 12 }}>
+          尚未產生。可以直接點 AI 撰寫，或下方自行貼上稿件後儲存。
+        </div>
+      )}
+      <textarea
+        value={draft}
+        onChange={(e) => { setDraft(e.target.value); setEditing(true); }}
+        placeholder="可以由 AI 撰寫，或自行撰寫後按「儲存目前內容」"
+        style={{
+          width: "100%", padding: 12, minHeight: 220,
+          fontFamily: "inherit", fontSize: 13.5, lineHeight: 1.7,
+          border: "1px solid var(--line)", borderRadius: 6, background: "var(--bg)",
+          color: "var(--ink-1)", resize: "vertical",
+        }}
+      />
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginTop: 8, fontSize: 12, color: "var(--ink-3)" }}>
+        <span>{stale ? "未儲存變更" : (data ? "已儲存" : "")}</span>
+        {data && (
+          <button
+            className="btn"
+            disabled={!stale || loading}
+            onClick={() => { onGenerate(draft); setEditing(false); }}
+            style={{ fontSize: 12 }}
+          >
+            儲存目前內容
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SectionHeader({
+  title, fileName, loading, primaryLabel, onPrimary, onDelete,
+}: {
+  title: string;
+  fileName?: string;
+  loading: boolean;
+  primaryLabel: string;
+  onPrimary: () => void;
+  onDelete?: () => void;
+}) {
+  return (
+    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap", marginBottom: 10 }}>
+      <div>
+        <div style={{ fontWeight: 600, fontSize: 15 }}>{title}</div>
+        {fileName && (
+          <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 4, fontFamily: "var(--font-mono)" }}>
+            {fileName}
+          </div>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        {onDelete && (
+          <button className="btn" onClick={onDelete} disabled={loading} style={{ fontSize: 12 }}>
+            刪除
+          </button>
+        )}
+        <button className="btn primary" onClick={onPrimary} disabled={loading} style={{ fontSize: 12, whiteSpace: "nowrap" }}>
+          {loading ? <><span className="spinner" style={{ width: 10, height: 10 }} /> 產生中…</> : primaryLabel}
+        </button>
+      </div>
     </div>
   );
 }

@@ -16,7 +16,7 @@ export default async function PricingPage() {
 
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { planTier: true, insightsUsed: true, cvTailorsUsed: true, usageMonth: true },
+    select: { planTier: true, insightsUsed: true, analysisUsed: true, usageMonth: true },
   });
 
   const tier = (user?.planTier ?? "free") as PlanTier;
@@ -28,7 +28,7 @@ export default async function PricingPage() {
       currentTier={tier}
       usageSummary={{
         insightsUsed: resetNeeded ? 0 : (user?.insightsUsed ?? 0),
-        cvUsed: resetNeeded ? 0 : (user?.cvTailorsUsed ?? 0),
+        analysisUsed: resetNeeded ? 0 : (user?.analysisUsed ?? 0),
         month,
       }}
     />

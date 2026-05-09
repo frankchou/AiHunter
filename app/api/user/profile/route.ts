@@ -12,7 +12,8 @@ export async function GET() {
     select: {
       planTier: true,
       insightsUsed: true,
-      cvTailorsUsed: true,
+      analysisUsed: true,
+      isSuperUser: true,
       usageMonth: true,
       stripeCustomerId: true,
     },

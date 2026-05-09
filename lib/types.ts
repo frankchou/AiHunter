@@ -97,6 +97,17 @@ export interface CVTailor {
   diffNote: string;
 }
 
+// Tailored cover letter content (B CV)
+export interface CoverLetterTailorPayload {
+  content: string;
+}
+
+// General cover letter (A CV)
+export interface CoverLetterPayload {
+  content: string;
+  fileName?: string;
+}
+
 export interface IndustryCompany {
   rank: number;
   name: string;

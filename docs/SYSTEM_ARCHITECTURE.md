@@ -31,12 +31,15 @@ AiHunter/
 │   │   └── settings/          # 設定頁
 │   ├── api/
 │   │   ├── jobs/[id]/
-│   │   │   ├── insights/      # AI 深度分析（GET/POST）
-│   │   │   └── cv/            # CV Tailor，Max only（GET/POST/DELETE）
+│   │   │   ├── insights/        # AI 深度分析（GET/POST）
+│   │   │   ├── cv/              # B 針對性履歷（ResumeTailor），Max only（GET/POST/DELETE）
+│   │   │   └── cover-letter/    # B 針對性 CV，Max only（GET/POST/DELETE）
 │   │   ├── resume/
-│   │   │   ├── parse/         # 履歷解析（POST，A 根履歷新版本入口）
-│   │   │   ├── analyze/       # 履歷 AI 分析（POST）
-│   │   │   └── versions/      # 履歷版本夾（GET 列表、[id] 預覽、[id]/download）
+│   │   │   ├── parse/           # 履歷解析（POST，A 履歷新版本入口）
+│   │   │   ├── analyze/         # 履歷 AI 分析（POST）
+│   │   │   └── versions/        # 履歷與 CV 版本夾合併清單（GET，Max only）
+│   │   ├── cover-letter/        # A CV 儲存/讀取（GET/POST，全 plan）
+│   │   │   └── draft/           # AI 起草/建議（POST，消耗 analysis 配額）
 │   │   ├── industries/        # 產業 Top 20（GET，支援 ?refresh=1）
 │   │   ├── ads/
 │   │   │   └── unlock/        # 廣告解鎖（POST）
@@ -57,8 +60,8 @@ AiHunter/
 │   │   ├── JobDetail.tsx      # 職缺詳情 + AI 分析
 │   │   └── SavedBoard.tsx     # 收藏看板
 │   ├── resume/
-│   │   ├── ResumeView.tsx     # 履歷 + 偏好設定（A 根履歷編輯）
-│   │   └── VersionFolderView.tsx # 履歷版本夾頁面（Max only）
+│   │   ├── ResumeView.tsx     # 履歷 + CV 編寫 + 偏好設定（A 履歷與 A CV 編輯）
+│   │   └── VersionFolderView.tsx # 履歷+CV 版本夾頁面（Max only，分兩區塊）
 │   ├── industry/
 │   │   └── IndustryView.tsx   # 產業排行 + 股價
 │   ├── subscription/
@@ -113,7 +116,7 @@ model User {
 }
 ```
 
-### Resume（A 根履歷與其歷史快照）
+### Resume（A 履歷與其歷史快照）
 
 ```prisma
 model Resume {
@@ -132,19 +135,35 @@ model Resume {
 }
 ```
 
-> A 一旦上傳即不可刪除（系統根資料）。重新上傳/儲存時：標記舊 row `isActive=false`，建新 row `isActive=true` 且 version+1。
+> A 履歷一旦上傳即不可刪除（系統根資料）。重新上傳/儲存時：標記舊 row `isActive=false`，建新 row `isActive=true` 且 version+1。
 
-### CVTailor（B 針對性履歷與其歷史快照，Max only）
+### CoverLetter（A CV 與其歷史快照，新增）
 
 ```prisma
-model CVTailor {
+model CoverLetter {
+  id        String    # cuid
+  userId    String
+  version   Int       # 由 1 起遞增
+  fileName  String?   # 系統命名 <UserName>_cv.pdf
+  content   String    # 純文字內容（自由敘事）
+  isActive  Boolean   # true = 當前最新版
+  createdAt DateTime
+}
+```
+
+> A CV 不可刪除。儲存或 AI 起草都建立新 row 並覆蓋。
+
+### ResumeTailor（B 針對性履歷，Max only；原 `CVTailor` 改名）
+
+```prisma
+model ResumeTailor {
   id        String    # cuid
   userId    String
   jobId     String
-  fileName  String?   # 英文檔名 Company_JobTitle_YYYY-MM-DD_Name_resume.pdf
+  fileName  String?   # 英文 Company_JobTitle_YYYY-MM-DD_Name_resume.pdf
   isCurrent Boolean   # true = 該 (user, job) 的最新版
-  summary   Json
-  bullets   Json
+  summary   Json      # { before, after }
+  bullets   Json      # [{ before, after }, ...]
   diffNote  String
   createdAt DateTime
   updatedAt DateTime
@@ -152,7 +171,23 @@ model CVTailor {
 }
 ```
 
-> 同 (userId, jobId) 重新產生 → 舊 row `isCurrent=false`、建新 row `isCurrent=true`。從 Prepare 頁刪除 → 物理刪除整組 (userId, jobId) 的所有 CVTailor row。**不允許刪除 A**。
+### CoverLetterTailor（B 針對性 CV，Max only，新增）
+
+```prisma
+model CoverLetterTailor {
+  id        String    # cuid
+  userId    String
+  jobId     String
+  fileName  String?   # 英文 Company_JobTitle_YYYY-MM-DD_Name_cv.pdf
+  isCurrent Boolean   # true = 該 (user, job) 的最新版
+  content   String    # 純文字內容
+  createdAt DateTime
+  updatedAt DateTime
+  @@index([userId, jobId, isCurrent])
+}
+```
+
+> B 文件同 (userId, jobId) 重新產生 → 舊 row `isCurrent=false`、建新 row `isCurrent=true`。從 Prepare 頁刪除 → 物理刪除整組 (userId, jobId) 的所有 row。**A 永不可刪**。
 
 ### 計數器重置邏輯
 
@@ -203,36 +238,53 @@ POST /api/ads/unlock
 onComplete() → 自動重試原 AI 功能
 ```
 
-### 履歷版本管理流程（Max only）
+### 履歷與 CV 版本管理流程（Max only 進入版本夾與 B 文件）
 
 ```
-[A 一般履歷編輯]
-/resume → POST /api/resume/parse
-    ├─ 檢查 user.planTier === "max" 不需要（A 全 plan 可用）
+[A 履歷編輯]
+/resume → POST /api/resume
+    ├─ 全 plan 可用（消耗 analysis 配額由 /api/resume/parse 處理）
     ├─ 標記既有 Resume isActive=false
     └─ 建立新 Resume row（version+1, isActive=true）
+
+[A CV 編輯 / AI 起草]
+/resume → POST /api/cover-letter （手動儲存）
+              POST /api/cover-letter/draft （AI 協助）
+    ├─ 全 plan 可用，消耗 analysis 配額（共用 cvTailor 不適用、走 analysis）
+    ├─ 標記既有 CoverLetter isActive=false
+    └─ 建立新 CoverLetter row（version+1, isActive=true）
 
 [B 針對性履歷產生]
 /job/[id] Prepare → POST /api/jobs/[id]/cv
     ├─ 檢查 user.planTier === "max"，否則 403
-    ├─ 取 A 當前版（Resume isActive=true） + Job 欄位作為輸入
-    ├─ AI 產出 summary/bullets/diffNote + 英文檔名
-    ├─ 標記既有 (userId, jobId) 的 CVTailor isCurrent=false
-    └─ 建立新 CVTailor row（isCurrent=true）
+    ├─ 取 A 履歷當前版 + Job 欄位作為輸入
+    ├─ AI 產出 summary/bullets/diffNote + 英文 fileName
+    ├─ 標記既有 (userId, jobId) 的 ResumeTailor isCurrent=false
+    └─ 建立新 ResumeTailor row（isCurrent=true）
+
+[B 針對性 CV 產生]
+/job/[id] Prepare → POST /api/jobs/[id]/cover-letter
+    ├─ 檢查 user.planTier === "max"，否則 403
+    ├─ 取 A 履歷 + A CV（如有） + Job 欄位作為輸入
+    ├─ AI 產出 content + 英文 fileName
+    ├─ 標記既有 (userId, jobId) 的 CoverLetterTailor isCurrent=false
+    └─ 建立新 CoverLetterTailor row（isCurrent=true）
 
 [版本夾列表]
 /resumes → GET /api/resume/versions
     ├─ 檢查 user.planTier === "max"，否則 403
-    ├─ Resume.findMany({ userId, isActive:true }) → 1 筆 A
-    ├─ CVTailor.findMany({ userId, isCurrent:true }) → N 筆 B
-    └─ 合併回傳統一 view
+    ├─ Resume.findMany({ userId, isActive:true }) → 1 筆 A 履歷
+    ├─ CoverLetter.findMany({ userId, isActive:true }) → 1 筆 A CV
+    ├─ ResumeTailor.findMany({ userId, isCurrent:true }) → N 筆 B 履歷
+    ├─ CoverLetterTailor.findMany({ userId, isCurrent:true }) → N 筆 B CV
+    └─ 合併分兩區塊回傳（resumes / coverLetters）
 
 [B 刪除（從 Prepare 源頭）]
-/job/[id] Prepare → DELETE /api/jobs/[id]/cv
-    └─ prisma.cVTailor.deleteMany({ where: { userId, jobId } })
+/job/[id] Prepare → DELETE /api/jobs/[id]/cv 或 cover-letter
+    └─ deleteMany({ where: { userId, jobId } })
 ```
 
-> A 永遠**不可刪除**，沒有對應的 DELETE endpoint。
+> A 履歷與 A CV 永遠**不可刪除**，沒有對應的 DELETE endpoint。
 
 ### 訂閱付費流程
 

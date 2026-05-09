@@ -6,7 +6,7 @@ import type { PlanTier } from "@/lib/plans";
 
 interface Props {
   currentTier: PlanTier;
-  usageSummary: { insightsUsed: number; cvUsed: number; month: string };
+  usageSummary: { insightsUsed: number; analysisUsed: number; month: string };
 }
 
 export function PricingView({ currentTier, usageSummary }: Props) {
@@ -61,7 +61,7 @@ export function PricingView({ currentTier, usageSummary }: Props) {
           </div>
           <div style={{ display: "flex", gap: 24, fontSize: 13 }}>
             <span>AI 分析：<b>{usageSummary.insightsUsed}</b> / 3 次</span>
-            <span>CV 客製：<b>{usageSummary.cvUsed}</b> / 1 次</span>
+            <span>履歷 + CV：<b>{usageSummary.analysisUsed}</b> / 3 次</span>
           </div>
         </div>
       )}
