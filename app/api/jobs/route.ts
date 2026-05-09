@@ -43,6 +43,8 @@ export async function GET(req: NextRequest) {
     if (filters.yearsMin) where.yearsMax = { gte: filters.yearsMin };
     if (filters.yearsMax) where.yearsMin = { lte: filters.yearsMax };
     if (filters.titles) where.title = { contains: filters.titles, mode: "insensitive" };
+    const companyFilter = sp.get("company");
+    if (companyFilter) where.company = { contains: companyFilter, mode: "insensitive" };
     if (filters.q) {
       where.OR = [
         { title: { contains: filters.q, mode: "insensitive" } },

@@ -24,18 +24,20 @@ AiHunter/
 │   ├── (dashboard)/           # 需登入的頁面群組
 │   │   ├── feed/              # 職缺流
 │   │   ├── saved/             # 我的收藏
-│   │   ├── resume/            # 履歷頁面
-│   │   ├── industry/          # 產業 Top 100
+│   │   ├── resume/            # 履歷頁面（A 根履歷的編輯入口）
+│   │   ├── resumes/           # 履歷版本夾（Max only，唯讀列表 + 預覽 + 下載）
+│   │   ├── industry/          # 產業 Top 20
 │   │   ├── pricing/           # 升級方案頁
 │   │   └── settings/          # 設定頁
 │   ├── api/
 │   │   ├── jobs/[id]/
 │   │   │   ├── insights/      # AI 深度分析（GET/POST）
-│   │   │   └── cv/            # CV 客製（GET/POST）
+│   │   │   └── cv/            # CV Tailor，Max only（GET/POST/DELETE）
 │   │   ├── resume/
-│   │   │   ├── parse/         # 履歷解析（POST）
-│   │   │   └── analyze/       # 履歷 AI 分析（POST）
-│   │   ├── industries/        # 產業 Top 100（GET，支援 ?refresh=1）
+│   │   │   ├── parse/         # 履歷解析（POST，A 根履歷新版本入口）
+│   │   │   ├── analyze/       # 履歷 AI 分析（POST）
+│   │   │   └── versions/      # 履歷版本夾（GET 列表、[id] 預覽、[id]/download）
+│   │   ├── industries/        # 產業 Top 20（GET，支援 ?refresh=1）
 │   │   ├── ads/
 │   │   │   └── unlock/        # 廣告解鎖（POST）
 │   │   ├── stripe/
@@ -55,7 +57,8 @@ AiHunter/
 │   │   ├── JobDetail.tsx      # 職缺詳情 + AI 分析
 │   │   └── SavedBoard.tsx     # 收藏看板
 │   ├── resume/
-│   │   └── ResumeView.tsx     # 履歷 + 偏好設定
+│   │   ├── ResumeView.tsx     # 履歷 + 偏好設定（A 根履歷編輯）
+│   │   └── VersionFolderView.tsx # 履歷版本夾頁面（Max only）
 │   ├── industry/
 │   │   └── IndustryView.tsx   # 產業排行 + 股價
 │   ├── subscription/
@@ -96,25 +99,68 @@ AiHunter/
 model User {
   id                   String    # NextAuth 用戶 ID
   email                String    # Google 帳號 Email
+  isSuperUser          Boolean   # true → 跳過所有計費限制（直接 DB 設定）
   planTier             String    # "free" | "pro" | "max"
   planExpiresAt        DateTime? # Stripe 訂閱到期日
   stripeCustomerId     String?   # Stripe Customer ID
   stripeSubscriptionId String?   # Stripe Subscription ID
   usageMonth           String?   # "2026-05"，月度計數器基準
   insightsUsed         Int       # 本月 AI 分析使用次數
-  cvTailorsUsed        Int       # 本月 CV 客製使用次數
+  cvTailorsUsed        Int       # （遺留欄位，CV Tailor 已升 Max 旗艦無配額）
   analysisUsed         Int       # 本月履歷解析/分析使用次數
   adUnlocksUsed        Int       # 本月廣告解鎖次數（上限 5）
   adTickets            Int       # 解析券餘額（跨月持久）
 }
 ```
 
+### Resume（A 根履歷與其歷史快照）
+
+```prisma
+model Resume {
+  id          String    # cuid
+  userId      String
+  version     Int       # 由 1 起遞增
+  fileName    String?   # 使用者上傳的原始檔名
+  fileData    String?   # base64 原檔（供版本夾下載）
+  fileMime    String?
+  rawText     String    # 解析後純文字
+  parsed      Json      # 解析後結構化內容
+  parsedHash  String?   # 內容 hash，避免重複 AI 分析
+  analysis    Json?     # 履歷 AI 分析結果快取
+  isActive    Boolean   # true = 當前最新版（每位 user 僅一筆 isActive=true）
+  createdAt   DateTime
+}
+```
+
+> A 一旦上傳即不可刪除（系統根資料）。重新上傳/儲存時：標記舊 row `isActive=false`，建新 row `isActive=true` 且 version+1。
+
+### CVTailor（B 針對性履歷與其歷史快照，Max only）
+
+```prisma
+model CVTailor {
+  id        String    # cuid
+  userId    String
+  jobId     String
+  fileName  String?   # 英文檔名 Company_JobTitle_YYYY-MM-DD_Name_resume.pdf
+  isCurrent Boolean   # true = 該 (user, job) 的最新版
+  summary   Json
+  bullets   Json
+  diffNote  String
+  createdAt DateTime
+  updatedAt DateTime
+  @@index([userId, jobId, isCurrent])
+}
+```
+
+> 同 (userId, jobId) 重新產生 → 舊 row `isCurrent=false`、建新 row `isCurrent=true`。從 Prepare 頁刪除 → 物理刪除整組 (userId, jobId) 的所有 CVTailor row。**不允許刪除 A**。
+
 ### 計數器重置邏輯
 
-- `insightsUsed`、`cvTailorsUsed`、`analysisUsed`、`adUnlocksUsed` 均為**惰性重置**
+- `insightsUsed`、`analysisUsed`、`adUnlocksUsed` 均為**惰性重置**
 - 每次功能執行時比對 `usageMonth !== currentMonth()`
 - 若月份不同：將當前計數器設為 1（本次）並更新 `usageMonth`
 - `adTickets` 永不自動重置
+- `cvTailorsUsed` 已不再使用（CV Tailor 改為 Max tier-gated，無配額制）
 
 ---
 
@@ -157,6 +203,37 @@ POST /api/ads/unlock
 onComplete() → 自動重試原 AI 功能
 ```
 
+### 履歷版本管理流程（Max only）
+
+```
+[A 一般履歷編輯]
+/resume → POST /api/resume/parse
+    ├─ 檢查 user.planTier === "max" 不需要（A 全 plan 可用）
+    ├─ 標記既有 Resume isActive=false
+    └─ 建立新 Resume row（version+1, isActive=true）
+
+[B 針對性履歷產生]
+/job/[id] Prepare → POST /api/jobs/[id]/cv
+    ├─ 檢查 user.planTier === "max"，否則 403
+    ├─ 取 A 當前版（Resume isActive=true） + Job 欄位作為輸入
+    ├─ AI 產出 summary/bullets/diffNote + 英文檔名
+    ├─ 標記既有 (userId, jobId) 的 CVTailor isCurrent=false
+    └─ 建立新 CVTailor row（isCurrent=true）
+
+[版本夾列表]
+/resumes → GET /api/resume/versions
+    ├─ 檢查 user.planTier === "max"，否則 403
+    ├─ Resume.findMany({ userId, isActive:true }) → 1 筆 A
+    ├─ CVTailor.findMany({ userId, isCurrent:true }) → N 筆 B
+    └─ 合併回傳統一 view
+
+[B 刪除（從 Prepare 源頭）]
+/job/[id] Prepare → DELETE /api/jobs/[id]/cv
+    └─ prisma.cVTailor.deleteMany({ where: { userId, jobId } })
+```
+
+> A 永遠**不可刪除**，沒有對應的 DELETE endpoint。
+
 ### 訂閱付費流程
 
 ```
@@ -183,7 +260,7 @@ checkout.session.completed
 | CV 客製 | claude-haiku-4-5 | ~3K in / 1K out | ~$0.012 |
 | 履歷解析 | claude-haiku-4-5 | ~2K in / 1K out | ~$0.008 |
 | 履歷 AI 分析 | claude-haiku-4-5 | ~2K in / 1K out | ~$0.010 |
-| 產業 Top 100 | claude-haiku-4-5 | ~1K in / 6K out | ~$0.050 |
+| 產業 Top 20 | claude-haiku-4-5 | ~1K in / 6K out | ~$0.050 |
 | 職缺評分（批量）| claude-haiku-4-5 | ~1K in / 0.1K out | ~$0.003/筆 |
 
 ---
@@ -198,12 +275,20 @@ checkout.session.completed
 | /api/user/profile | /api/user/profile | true |
 | /api/stocks | 依 symbols | false |
 
-### 產業 Top 100 快取
+### 產業 Top 20 快取
 
 - 伺服器端 DB 快取：7 天 TTL（IndustryCache model）
 - Free 用戶：只能使用快取版本
 - Pro/Max：可強制刷新（`?refresh=1`），免費
 - Free + 有解析券：消耗 3 張券後可強制刷新
+
+### 產業 Top 20 工作機會數對應
+
+- 每間 AI 推薦公司會顯示 `工作機會 (N)` badge，N 來自當前 `Job` 表
+- 比對方式：**case-insensitive `contains`**（DB 公司名常為「台達電子工業股份有限公司 _DELTA ELECTRONICS INC.」格式，AI 給「Delta Electronics」），`name` 為子字串即計入
+- 點擊 badge → 用 `/api/jobs?company=<name>` 同樣 `contains` 比對載入清單
+- N=0 時 badge disabled
+- 若整體 N 偏低，根本原因為 crawler 來源以本地中小型公司為主，跟 AI 推薦的全球巨頭重疊度低（待擴充職源）
 
 ---
 
@@ -212,9 +297,10 @@ checkout.session.completed
 | 項目 | 實作方式 |
 |------|---------|
 | 路由保護 | getServerSession() 在每個 API route |
-| Owner bypass | 比對 email === OWNER_EMAIL（環境變數）|
+| Super User bypass | `User.isSuperUser=true`（DB 欄位，非環境變數）|
 | Stripe Webhook | stripe.webhooks.constructEvent()（簽名驗證）|
 | 廣告解鎖防刷 | 服務端 adUnlocksUsed 月度計數（max 5）|
 | 產業刷新門控 | consumeUsage("industryRefresh") 伺服器端驗證 |
+| Max-only 功能門控 | API route 開頭檢查 `user.planTier === "max"`，不通過回 403（CV Tailor、版本夾）|
 
 > ⚠️ 目前廣告解鎖 API 未串接真實廣告 SDK 驗證 token，生產環境上線前需整合 Google AdSense Rewarded 或 AdMob，在 `AdWatcher.tsx` 的廣告區域替換模擬計時器。

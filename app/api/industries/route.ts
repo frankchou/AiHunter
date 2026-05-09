@@ -74,28 +74,50 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    // Check cache
+    type RawCompany = { name: string; [k: string]: unknown };
+    type Payload   = { companies: RawCompany[] };
+    let payload: Payload | undefined;
+    let cached = false;
+
     if (!forceRefresh) {
-      const cached = await prisma.industryCache.findUnique({ where: { industry } });
-      if (cached) {
-        const ageMs = Date.now() - cached.updatedAt.getTime();
+      const row = await prisma.industryCache.findUnique({ where: { industry } });
+      if (row) {
+        const ageMs = Date.now() - row.updatedAt.getTime();
         if (ageMs < CACHE_TTL_DAYS * 24 * 60 * 60 * 1000) {
-          return NextResponse.json({ ...(cached.data as object), industries: INDUSTRIES, cached: true });
+          payload = row.data as unknown as Payload;
+          cached = true;
         }
       }
     }
 
-    // Generate with AI
-    const data = await generateIndustryTop(industry);
+    if (!payload) {
+      payload = (await generateIndustryTop(industry)) as Payload;
+      await prisma.industryCache.upsert({
+        where: { industry },
+        create: { industry, data: payload as unknown as object },
+        update: { data: payload as unknown as object, updatedAt: new Date() },
+      });
+    }
 
-    // Cache result
-    await prisma.industryCache.upsert({
-      where: { industry },
-      create: { industry, data },
-      update: { data, updatedAt: new Date() },
-    });
+    // Attach live jobCount per company using case-insensitive contains match
+    // (DB stores company names like "台達電子工業股份有限公司 _DELTA ELECTRONICS INC."
+    //  while AI returns "Delta Electronics" — exact match misses these)
+    const counts = await Promise.all(
+      payload.companies.map(async (c) => {
+        if (!c.name) return [c.name, 0] as const;
+        const count = await prisma.job.count({
+          where: { company: { contains: c.name, mode: "insensitive" } },
+        });
+        return [c.name, count] as const;
+      })
+    );
+    const countByName = Object.fromEntries(counts);
+    const companies = payload.companies.map((c) => ({
+      ...c,
+      jobCount: countByName[c.name] ?? 0,
+    }));
 
-    return NextResponse.json({ ...(data as object), industries: INDUSTRIES, cached: false });
+    return NextResponse.json({ companies, industries: INDUSTRIES, cached });
   } catch (e) {
     console.error("[industries]", e);
     return NextResponse.json({ companies: [], industries: INDUSTRIES, error: String(e) });
