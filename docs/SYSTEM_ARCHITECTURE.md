@@ -46,6 +46,8 @@ AiHunter/
 │   │   ├── stocks/            # 即時股價（GET，5 分鐘快取）
 │   │   ├── ads/
 │   │   │   └── unlock/        # 廣告解鎖（POST）
+│   │   ├── chat/
+│   │   │   └── threads/         # AI 共創履歷對話 thread + message + apply（Max only）
 │   │   ├── stripe/
 │   │   │   ├── checkout/      # 建立付款 Session（POST）
 │   │   │   ├── portal/        # Stripe Customer Portal（用於更新付款方式）
@@ -71,6 +73,9 @@ AiHunter/
 │   │   └── VersionFolderView.tsx # 履歷+CV 版本夾頁面（Max only，分兩區塊）
 │   ├── industry/
 │   │   └── IndustryView.tsx   # 產業排行 + 股價
+│   ├── cocreate/
+│   │   ├── CoCreateButton.tsx # 右下浮動按鈕（Max-only）
+│   │   └── CoCreatePanel.tsx  # 共創對話面板（桌機側拉 / 手機全螢幕 sheet）
 │   ├── subscription/
 │   │   ├── AdWatcher.tsx       # 廣告觀看元件（3 則序列）
 │   │   ├── PricingView.tsx     # 方案選擇頁（含取消/降級按鈕）
@@ -210,6 +215,35 @@ model FinancialsCache {
 ```
 
 > 由 `/api/financials` 寫入，IndustryView 展開行時透過 SWR 讀取。
+
+### ResumeChat / ResumeChatMessage（AI 共創對話 + 提案，Max only）
+
+```prisma
+model ResumeChat {
+  id        String              # cuid
+  userId    String
+  title     String              # 自首則 user message 截 40 字
+  docKind   String              # "resume-a" | "cv-a" | "resume-b" | "cv-b" | "general"
+  jobId     String?             # B 文件對應的 jobId
+  createdAt DateTime
+  updatedAt DateTime
+  messages  ResumeChatMessage[]
+}
+
+model ResumeChatMessage {
+  id          String   # cuid
+  chatId      String
+  role        String   # "user" | "assistant"
+  content     String   # 對話文字
+  editTarget  String?  # AI 提案的目標欄位（如 "summary", "bullet:0:1", "content"）
+  editBefore  String?  # 提案前文字
+  editAfter   String?  # 提案後文字
+  applied     Boolean  # 使用者是否已套用此提案
+  createdAt   DateTime
+}
+```
+
+> 每位使用者最多保留 30 個 chat（依 `updatedAt` 倒序，超過刪最舊）。每個 chat 是獨立 thread，不共享記憶。提案套用會直接寫回對應的源文件並新增版本。
 
 ### CancellationFeedback（取消/降級原因收集）
 

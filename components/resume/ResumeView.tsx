@@ -6,6 +6,7 @@ import { AdWatcher } from "@/components/subscription/AdWatcher";
 import { AD_UNLOCK_ENABLED } from "@/lib/plans";
 import type { ParsedResume, ResumeAnalysis } from "@/lib/types";
 import { CoverLetterCard } from "@/components/resume/CoverLetterCard";
+import { CoCreateButton } from "@/components/cocreate/CoCreateButton";
 
 interface LimitInfo { planTier: string; tickets: number; adSessionsLeft: number }
 
@@ -446,6 +447,13 @@ export function ResumeView() {
       </div>
 
       <CoverLetterCard />
+
+      <CoCreateButton
+        contextOptions={[
+          { docKind: "resume-a", label: "一般履歷" },
+          { docKind: "cv-a",     label: "一般 CV (Cover Letter)" },
+        ]}
+      />
     </div>
   );
 }

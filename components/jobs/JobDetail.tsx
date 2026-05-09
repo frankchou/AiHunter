@@ -5,6 +5,7 @@ import useSWR from "swr";
 import { fmtSalary, sourceHost, relativeTime } from "@/lib/utils";
 import { AdWatcher } from "@/components/subscription/AdWatcher";
 import { AD_UNLOCK_ENABLED } from "@/lib/plans";
+import { CoCreateButton } from "@/components/cocreate/CoCreateButton";
 import type { Job, Insight, CVTailor } from "@/lib/types";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
@@ -337,6 +338,13 @@ export function JobDetail({ job }: { job: Job }) {
           </div>
         )}
       </div>
+
+      <CoCreateButton
+        contextOptions={[
+          { docKind: "resume-b", jobId: job.id, label: `針對性履歷（${job.company} – ${job.title}）` },
+          { docKind: "cv-b",     jobId: job.id, label: `針對性 CV（${job.company} – ${job.title}）` },
+        ]}
+      />
     </div>
   );
 }
