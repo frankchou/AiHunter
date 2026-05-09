@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { fmtSalary, sourceHost, relativeTime } from "@/lib/utils";
 import { AdWatcher } from "@/components/subscription/AdWatcher";
+import { AD_UNLOCK_ENABLED } from "@/lib/plans";
 import type { Job, Insight, CVTailor } from "@/lib/types";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
@@ -336,7 +337,7 @@ function LimitBanner({ limit, onWatchAd, onAdComplete, onAdCancel, watching, tic
         {limit.planTier === "free" && <>　·　本月廣告解鎖剩餘：<b>{limit.adSessionsLeft}</b> 次</>}
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {limit.planTier === "free" && limit.adSessionsLeft > 0 && (
+        {AD_UNLOCK_ENABLED && limit.planTier === "free" && limit.adSessionsLeft > 0 && (
           <button className="btn primary" onClick={onWatchAd} style={{ fontSize: 13 }}>
             📺 看廣告獲得 +{ticketCost} 解析券
           </button>

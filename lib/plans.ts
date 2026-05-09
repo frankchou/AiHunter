@@ -14,6 +14,11 @@ export const AD_DURATION_SEC       = 30;   // seconds per individual ad
 export const AD_ADS_PER_SESSION    = 3;    // ads shown per unlock session
 export const AD_UNLOCK_MONTHLY_CAP = 5;   // max unlock sessions per month → max 5 tickets/month
 
+// Set NEXT_PUBLIC_ENABLE_AD_UNLOCK=false in .env.local to hide ad unlock UI and block the API.
+// Set to true (or omit) once a real ad SDK is integrated and AdMob/AdSense account is approved.
+export const AD_UNLOCK_ENABLED =
+  process.env.NEXT_PUBLIC_ENABLE_AD_UNLOCK !== "false";
+
 // ── Plan definitions ─────────────────────────────────────────────────────────
 export const PLANS = {
   free: {

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { currentMonth, AD_UNLOCK_MONTHLY_CAP } from "@/lib/plans";
+import { currentMonth, AD_UNLOCK_MONTHLY_CAP, AD_UNLOCK_ENABLED } from "@/lib/plans";
 
 // Called after user completes watching all ads in one session (AD_ADS_PER_SESSION ads)
 export async function POST() {
@@ -14,6 +14,10 @@ export async function POST() {
     select: { planTier: true, usageMonth: true, adUnlocksUsed: true, adTickets: true },
   });
   if (!user) return NextResponse.json({ error: "Not found" }, { status: 404 });
+
+  if (!AD_UNLOCK_ENABLED) {
+    return NextResponse.json({ error: "Ad unlock is disabled" }, { status: 503 });
+  }
 
   if (user.planTier !== "free") {
     return NextResponse.json({ error: "Ad unlock is only for Free plan" }, { status: 403 });

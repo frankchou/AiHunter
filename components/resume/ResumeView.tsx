@@ -3,6 +3,7 @@ import { useState, useRef, useCallback } from "react";
 import useSWR from "swr";
 import { INDUSTRIES, WORLD_LOCATIONS } from "@/lib/mock-data";
 import { AdWatcher } from "@/components/subscription/AdWatcher";
+import { AD_UNLOCK_ENABLED } from "@/lib/plans";
 import type { ParsedResume, ResumeAnalysis } from "@/lib/types";
 
 interface LimitInfo { planTier: string; tickets: number; adSessionsLeft: number }
@@ -174,7 +175,7 @@ export function ResumeView() {
             )}
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            {(parseLimit ?? analyzeLimit)!.planTier === "free" && (parseLimit ?? analyzeLimit)!.adSessionsLeft > 0 && (
+            {AD_UNLOCK_ENABLED && (parseLimit ?? analyzeLimit)!.planTier === "free" && (parseLimit ?? analyzeLimit)!.adSessionsLeft > 0 && (
               <button className="btn primary" style={{ fontSize: 13 }}
                 onClick={() => setAdWatching(parseLimit ? "parse" : "analyze")}>
                 📺 看廣告獲得 +1 解析券
