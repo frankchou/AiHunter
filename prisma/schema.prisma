@@ -46,19 +46,22 @@ model VerificationToken {
 // ─── App models ──────────────────────────────────────────────────────────────
 
 model User {
-  id              String       @id @default(cuid())
-  name            String?
-  email           String?      @unique
-  emailVerified   DateTime?
-  image           String?
-  onboardingStep  Int          @default(0)
-  planTier        String       @default("free")   // free | pro | max
-  planExpiresAt   DateTime?                        // null = free forever
-  usageMonth      String?                          // "2026-05", resets counters when month changes
-  analysisUsed    Int          @default(0)
-  insightsUsed    Int          @default(0)
-  cvTailorsUsed   Int          @default(0)
-  createdAt       DateTime     @default(now())
+  id                   String       @id @default(cuid())
+  name                 String?
+  email                String?      @unique
+  emailVerified        DateTime?
+  image                String?
+  onboardingStep       Int          @default(0)
+  planTier             String       @default("free")   // free | pro | max
+  planExpiresAt        DateTime?                        // null = free forever
+  stripeCustomerId     String?      @unique
+  stripeSubscriptionId String?      @unique
+  usageMonth           String?                          // "2026-05", resets counters when month changes
+  analysisUsed         Int          @default(0)
+  insightsUsed         Int          @default(0)
+  cvTailorsUsed        Int          @default(0)
+  adUnlocksUsed        Int          @default(0)         // ad-unlocked extras this month
+  createdAt            DateTime     @default(now())
   accounts        Account[]
   sessions        Session[]
   resumes         Resume[]

@@ -1,9 +1,41 @@
 "use client";
 import { useState } from "react";
 import { signOut, useSession } from "next-auth/react";
+import { useRouter } from "next/navigation";
+import useSWR from "swr";
+import { PLANS, currentMonth } from "@/lib/plans";
+import type { PlanTier } from "@/lib/plans";
+
+const fetcher = (url: string) => fetch(url).then((r) => r.json());
+
+interface UserProfile {
+  planTier: string;
+  insightsUsed: number;
+  cvTailorsUsed: number;
+  usageMonth: string | null;
+  stripeCustomerId: string | null;
+}
 
 export function SettingsView() {
   const { data: session } = useSession();
+  const router = useRouter();
+  const { data: profile } = useSWR<UserProfile>("/api/user/profile", fetcher);
+
+  const tier = (profile?.planTier ?? "free") as PlanTier;
+  const plan = PLANS[tier];
+  const month = currentMonth();
+  const resetNeeded = profile?.usageMonth !== month;
+  const insightsUsed = resetNeeded ? 0 : (profile?.insightsUsed ?? 0);
+  const cvUsed = resetNeeded ? 0 : (profile?.cvTailorsUsed ?? 0);
+  const insightsLimit = plan.limits.insightsPerMonth;
+  const cvLimit = plan.limits.cvTailorsPerMonth;
+
+  const handlePortal = async () => {
+    const res = await fetch("/api/stripe/portal", { method: "POST" });
+    const { url, error } = await res.json();
+    if (error) { alert("請先完成訂閱後再試"); return; }
+    if (url) window.location.href = url;
+  };
 
   // Notification prefs (local state for now)
   const [minScore, setMinScore] = useState(70);
@@ -64,6 +96,49 @@ export function SettingsView() {
           >
             登出
           </button>
+        </div>
+
+        {/* Plan */}
+        <div className="card" style={{ padding: 18 }}>
+          <div className="eyebrow" style={{ marginBottom: 12 }}>目前方案</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 18 }}>
+                {plan.nameZh}
+                {plan.monthlyUsd > 0 && (
+                  <span style={{ fontWeight: 400, fontSize: 13, color: "var(--ink-3)", marginLeft: 8 }}>
+                    ${plan.monthlyUsd}/月
+                  </span>
+                )}
+              </div>
+              <div style={{ marginTop: 10, display: "flex", gap: 20, fontSize: 13 }}>
+                <div>
+                  <div style={{ color: "var(--ink-3)", fontSize: 11, marginBottom: 3 }}>AI 分析</div>
+                  <div style={{ fontWeight: 600 }}>
+                    {insightsUsed} / {insightsLimit === null ? "∞" : insightsLimit}
+                    <span style={{ fontWeight: 400, color: "var(--ink-3)", fontSize: 11, marginLeft: 4 }}>次/月</span>
+                  </div>
+                </div>
+                <div>
+                  <div style={{ color: "var(--ink-3)", fontSize: 11, marginBottom: 3 }}>CV 客製</div>
+                  <div style={{ fontWeight: 600 }}>
+                    {cvUsed} / {cvLimit === null ? "∞" : cvLimit}
+                    <span style={{ fontWeight: 400, color: "var(--ink-3)", fontSize: 11, marginLeft: 4 }}>次/月</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {tier !== "free" && (
+                <button className="btn" style={{ fontSize: 12 }} onClick={handlePortal}>
+                  管理訂閱
+                </button>
+              )}
+              <button className="btn primary" style={{ fontSize: 12 }} onClick={() => router.push("/pricing")}>
+                {tier === "free" ? "🚀 升級方案" : "查看方案"}
+              </button>
+            </div>
+          </div>
         </div>
 
         {/* Notifications */}

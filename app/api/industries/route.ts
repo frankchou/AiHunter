@@ -27,7 +27,7 @@ For each company provide honest, actionable info for job seekers. Respond in JSO
     {
       "rank": 1,
       "name": "Company Name",
-      "ticker": "Yahoo Finance ticker — use exact format: US=MSFT, TW=2330.TW, JP=9984.T, KR=005930.KS, HK=0700.HK (4-digit with leading zero), EU=SAP.DE. Private companies=null.",
+      "ticker": "Yahoo Finance ticker symbol only (no prefix). US stocks: MSFT AAPL NVDA. Taiwan: 2330.TW 2317.TW. Japan: 9984.T 6758.T. Korea: 005930.KS. HK: 0700.HK 9988.HK (always 4 digits with leading zero). EU: SAP.DE ASML.AS. Private companies (OpenAI, Anthropic, ByteDance): null.",
       "region": "US | TW | JP | KR | HK | EU | Global",
       "pros": ["hiring culture pro 1 in zh-TW", "pro 2", "pro 3"],
       "cons": ["hiring culture con 1 in zh-TW", "con 2"],

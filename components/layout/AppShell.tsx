@@ -10,6 +10,7 @@ const NAV = [
   { id: "saved",    href: "/saved",    label: "我的收藏",       icon: "★" },
   { id: "resume",   href: "/resume",   label: "履歷",           icon: "📄" },
   { id: "industry", href: "/industry", label: "產業 Top 100",   icon: "🏢" },
+  { id: "pricing",  href: "/pricing",  label: "升級方案",       icon: "🚀" },
   { id: "settings", href: "/settings", label: "設定",           icon: "⚙" },
 ];
 

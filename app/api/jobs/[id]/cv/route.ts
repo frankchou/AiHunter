@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { MOCK_JOBS, getMockCV } from "@/lib/mock-data";
 import { generateCVTailor } from "@/lib/ai/cv-tailor";
+import { getPlan, checkLimit, currentMonth } from "@/lib/plans";
 import type { ParsedResume, Job } from "@/lib/types";
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
@@ -22,6 +23,31 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  // Check plan limits
+  const user = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { planTier: true, cvTailorsUsed: true, adUnlocksUsed: true, usageMonth: true },
+  });
+  if (user) {
+    const plan = getPlan(user.planTier);
+    const { allowed, resetNeeded } = checkLimit({
+      used: user.cvTailorsUsed,
+      adUnlocks: 0, // ad unlock only applies to insights
+      limit: plan.limits.cvTailorsPerMonth,
+      usageMonth: user.usageMonth,
+    });
+    if (!allowed) {
+      return NextResponse.json({ error: "LIMIT_REACHED", planTier: user.planTier }, { status: 402 });
+    }
+    await prisma.user.update({
+      where: { id: session.user.id },
+      data: {
+        cvTailorsUsed: resetNeeded ? 1 : { increment: 1 },
+        usageMonth: resetNeeded ? currentMonth() : undefined,
+      },
+    });
+  }
 
   try {
     let job = MOCK_JOBS.find((j) => j.id === params.id) ?? null;

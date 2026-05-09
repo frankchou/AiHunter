@@ -1,71 +1,92 @@
+export type PlanTier = "free" | "pro" | "max";
+
 export const PLANS = {
   free: {
     name: "Free",
     nameZh: "免費版",
-    price: 0,
+    monthlyUsd: 0,
+    stripePriceId: null as string | null,
     limits: {
-      resumeAnalysisPerMonth: 1,   // 1次/月，onboarding後就不能重跑
-      savedJobs: 5,
-      insightsPerMonth: 0,         // 不能看職缺 SWOT
-      cvTailorsPerMonth: 0,        // 不能用 CV Tailor
-      jobAiScore: false,           // 職缺流不顯示 AI 匹配分數
+      insightsPerMonth: 3,
+      cvTailorsPerMonth: 1,
+      adUnlock: true,
+      mockInterview: false,
+      forceRefreshIndustry: false,
     },
     features: [
-      "AI 解析履歷（1次）",
-      "履歷 AI 分析（每月 1 次）",
-      "職缺流瀏覽",
-      "儲存職缺（最多 5 個）",
+      "職缺流瀏覽（無限）",
+      "AI 深度分析 3 次 / 月",
+      "CV 客製 1 次 / 月",
+      "看廣告解鎖額外分析次數",
     ],
   },
   pro: {
     name: "Pro",
     nameZh: "專業版",
-    price: 299,
+    monthlyUsd: 9.9,
+    stripePriceId: process.env.STRIPE_PRO_PRICE_ID ?? null,
     limits: {
-      resumeAnalysisPerMonth: 10,
-      savedJobs: 200,
       insightsPerMonth: 30,
       cvTailorsPerMonth: 15,
-      jobAiScore: true,
+      adUnlock: false,
+      mockInterview: false,
+      forceRefreshIndustry: true,
     },
     features: [
-      "AI 解析履歷（無限次）",
-      "履歷 AI 分析（每月 10 次）",
-      "職缺流 AI 匹配評分",
-      "職缺 SWOT 分析（每月 30 次）",
-      "AI 客製化履歷（每月 15 次）",
-      "儲存職缺（最多 200 個）",
+      "AI 深度分析 30 次 / 月",
+      "CV 客製 15 次 / 月",
+      "產業 Top 100 強制更新",
+      "無廣告",
     ],
   },
   max: {
     name: "Max",
     nameZh: "旗艦版",
-    price: 599,
+    monthlyUsd: 29.9,
+    stripePriceId: process.env.STRIPE_MAX_PRICE_ID ?? null,
     limits: {
-      resumeAnalysisPerMonth: -1,  // -1 = unlimited
-      savedJobs: -1,
-      insightsPerMonth: -1,
-      cvTailorsPerMonth: -1,
-      jobAiScore: true,
+      insightsPerMonth: null as number | null,  // unlimited
+      cvTailorsPerMonth: null as number | null,
+      adUnlock: false,
+      mockInterview: true,
+      forceRefreshIndustry: true,
     },
     features: [
-      "所有 Pro 功能，全部無限次",
-      "職缺 SWOT 分析（無限次）",
-      "AI 客製化履歷（無限次）",
-      "儲存職缺（無限）",
-      "每週 AI 求職市場報告（即將推出）",
-      "AI 面試問題預測（即將推出）",
+      "AI 深度分析無限次",
+      "CV 客製無限次",
+      "AI 模擬面試（即將推出）",
+      "全功能優先使用",
     ],
   },
-} as const;
+};
 
-export type PlanTier = keyof typeof PLANS;
-
-export function getPlan(tier: string): typeof PLANS[PlanTier] {
+export function getPlan(tier: string) {
   return PLANS[(tier as PlanTier) in PLANS ? (tier as PlanTier) : "free"];
 }
 
-/** -1 means unlimited; otherwise check if used < limit */
-export function withinLimit(used: number, limit: number): boolean {
-  return limit === -1 || used < limit;
+export const AD_DURATION_SEC = 30;
+
+export function currentMonth(): string {
+  return new Date().toISOString().slice(0, 7);
+}
+
+/**
+ * Check usage against plan limit, accounting for monthly reset.
+ * adUnlocks = extra credits earned by watching ads this month.
+ */
+export function checkLimit(opts: {
+  used: number;
+  adUnlocks: number;
+  limit: number | null;
+  usageMonth: string | null;
+}): { allowed: boolean; remaining: number | null; resetNeeded: boolean } {
+  const { used, adUnlocks, limit, usageMonth } = opts;
+  const month = currentMonth();
+  const resetNeeded = usageMonth !== month;
+  const effectiveUsed = resetNeeded ? 0 : used;
+  const effectiveAdUnlocks = resetNeeded ? 0 : adUnlocks;
+
+  if (limit === null) return { allowed: true, remaining: null, resetNeeded };
+  const remaining = Math.max(0, limit + effectiveAdUnlocks - effectiveUsed);
+  return { allowed: remaining > 0, remaining, resetNeeded };
 }

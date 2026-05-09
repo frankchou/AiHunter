@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { MOCK_JOBS, getMockInsight } from "@/lib/mock-data";
 import { generateInsight } from "@/lib/ai/insights";
+import { getPlan, checkLimit, currentMonth } from "@/lib/plans";
 import type { ParsedResume, Job } from "@/lib/types";
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
@@ -23,6 +24,38 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  // Check plan limits
+  const user = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { planTier: true, insightsUsed: true, adUnlocksUsed: true, usageMonth: true },
+  });
+  if (user) {
+    const plan = getPlan(user.planTier);
+    const { allowed, remaining, resetNeeded } = checkLimit({
+      used: user.insightsUsed,
+      adUnlocks: user.adUnlocksUsed,
+      limit: plan.limits.insightsPerMonth,
+      usageMonth: user.usageMonth,
+    });
+    if (!allowed) {
+      return NextResponse.json({
+        error: "LIMIT_REACHED",
+        remaining: 0,
+        planTier: user.planTier,
+      }, { status: 402 });
+    }
+    // Reset counters if new month, then increment
+    await prisma.user.update({
+      where: { id: session.user.id },
+      data: {
+        insightsUsed: resetNeeded ? 1 : { increment: 1 },
+        adUnlocksUsed: resetNeeded ? 0 : undefined,
+        usageMonth: resetNeeded ? currentMonth() : undefined,
+      },
+    });
+    void remaining; // used in response header below
+  }
 
   try {
     // Get job

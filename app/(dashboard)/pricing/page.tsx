@@ -1,0 +1,36 @@
+import { getServerSession } from "next-auth";
+import { redirect } from "next/navigation";
+import { authOptions } from "@/lib/auth";
+import { prisma } from "@/lib/prisma";
+import { PricingView } from "@/components/subscription/PricingView";
+import { currentMonth } from "@/lib/plans";
+import type { PlanTier } from "@/lib/plans";
+
+export async function generateMetadata() {
+  return { title: "升級方案 — AI Hunter" };
+}
+
+export default async function PricingPage() {
+  const session = await getServerSession(authOptions);
+  if (!session) redirect("/login");
+
+  const user = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { planTier: true, insightsUsed: true, cvTailorsUsed: true, usageMonth: true },
+  });
+
+  const tier = (user?.planTier ?? "free") as PlanTier;
+  const month = currentMonth();
+  const resetNeeded = user?.usageMonth !== month;
+
+  return (
+    <PricingView
+      currentTier={tier}
+      usageSummary={{
+        insightsUsed: resetNeeded ? 0 : (user?.insightsUsed ?? 0),
+        cvUsed: resetNeeded ? 0 : (user?.cvTailorsUsed ?? 0),
+        month,
+      }}
+    />
+  );
+}

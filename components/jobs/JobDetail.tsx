@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { fmtSalary, sourceHost, relativeTime } from "@/lib/utils";
+import { UpgradePrompt } from "@/components/subscription/UpgradePrompt";
 import type { Job, Insight, CVTailor } from "@/lib/types";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
@@ -13,6 +14,7 @@ export function JobDetail({ job }: { job: Job }) {
   const [generatingInsight, setGeneratingInsight] = useState(false);
   const [generatingCV, setGeneratingCV] = useState(false);
   const [tab, setTab] = useState<"overview" | "swot" | "risks" | "qa" | "cv">("overview");
+  const [limitModal, setLimitModal] = useState<{ feature: "insight" | "cv"; planTier: string } | null>(null);
 
   const { data: insightData, mutate: mutateInsight } = useSWR<Insight & { id?: string }>(
     `/api/jobs/${job.id}/insights`,
@@ -40,8 +42,13 @@ export function JobDetail({ job }: { job: Job }) {
   const generateInsight = async () => {
     setGeneratingInsight(true);
     try {
-      const d = await fetch(`/api/jobs/${job.id}/insights`, { method: "POST" }).then((r) => r.json());
-      await mutateInsight(d);
+      const res = await fetch(`/api/jobs/${job.id}/insights`, { method: "POST" });
+      if (res.status === 402) {
+        const { planTier } = await res.json();
+        setLimitModal({ feature: "insight", planTier });
+        return;
+      }
+      await mutateInsight(await res.json());
       setTab("overview");
     } finally {
       setGeneratingInsight(false);
@@ -51,8 +58,13 @@ export function JobDetail({ job }: { job: Job }) {
   const generateCV = async () => {
     setGeneratingCV(true);
     try {
-      const d = await fetch(`/api/jobs/${job.id}/cv`, { method: "POST" }).then((r) => r.json());
-      await mutateCV(d);
+      const res = await fetch(`/api/jobs/${job.id}/cv`, { method: "POST" });
+      if (res.status === 402) {
+        const { planTier } = await res.json();
+        setLimitModal({ feature: "cv", planTier });
+        return;
+      }
+      await mutateCV(await res.json());
     } finally {
       setGeneratingCV(false);
     }
@@ -72,6 +84,15 @@ export function JobDetail({ job }: { job: Job }) {
   const scoreClass = scorePct == null ? "pending" : scorePct >= 75 ? "high" : scorePct >= 50 ? "mid" : "low";
 
   return (
+    <>
+    {limitModal && (
+      <UpgradePrompt
+        planTier={limitModal.planTier}
+        feature={limitModal.feature}
+        onUnlocked={() => { setLimitModal(null); if (limitModal.feature === "insight") generateInsight(); else generateCV(); }}
+        onClose={() => setLimitModal(null)}
+      />
+    )}
     <div className="app-content">
       <button className="btn" onClick={() => router.back()} style={{ marginBottom: 14 }}>← 回職缺流</button>
 
@@ -269,6 +290,7 @@ export function JobDetail({ job }: { job: Job }) {
         )}
       </div>
     </div>
+    </>
   );
 }
 
