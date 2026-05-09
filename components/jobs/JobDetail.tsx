@@ -1,7 +1,7 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import useSWR, { mutate as globalMutate } from "swr";
+import useSWR from "swr";
 import { fmtSalary, sourceHost, relativeTime } from "@/lib/utils";
 import type { Job, Insight, CVTailor } from "@/lib/types";
 
@@ -10,134 +10,194 @@ const fetcher = (url: string) => fetch(url).then((r) => r.json());
 export function JobDetail({ job }: { job: Job }) {
   const router = useRouter();
   const [saved, setSaved] = useState(false);
-  const [generating, setGenerating] = useState(false);
-  const [tab, setTab] = useState<"strategy" | "risks" | "qa" | "cv">("strategy");
+  const [generatingInsight, setGeneratingInsight] = useState(false);
+  const [generatingCV, setGeneratingCV] = useState(false);
+  const [tab, setTab] = useState<"overview" | "swot" | "risks" | "qa" | "cv">("overview");
 
   const { data: insightData, mutate: mutateInsight } = useSWR<Insight & { id?: string }>(
     `/api/jobs/${job.id}/insights`,
-    fetcher
+    fetcher,
+    { revalidateOnFocus: false }
   );
   const { data: cvData, mutate: mutateCV } = useSWR<CVTailor & { id?: string }>(
     `/api/jobs/${job.id}/cv`,
-    fetcher
+    fetcher,
+    { revalidateOnFocus: false }
+  );
+  const { data: savedData } = useSWR<{ saved: boolean }>(
+    `/api/saved/check?jobId=${job.id}`,
+    fetcher,
+    { revalidateOnFocus: false }
   );
 
-  const insight = insightData?.id ? insightData : null;
-  const cv = cvData?.id ? cvData : null;
+  useEffect(() => {
+    if (savedData?.saved != null) setSaved(savedData.saved);
+  }, [savedData]);
 
-  const handleSave = async () => {
-    setSaved((s) => !s);
-    if (!saved) {
-      await fetch("/api/saved", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId: job.id }),
-      });
-      // Generate insights on save
-      setGenerating(true);
-      try {
-        await Promise.all([
-          fetch(`/api/jobs/${job.id}/insights`, { method: "POST" }).then((r) => r.json()).then((d) => mutateInsight(d)),
-          fetch(`/api/jobs/${job.id}/cv`, { method: "POST" }).then((r) => r.json()).then((d) => mutateCV(d)),
-        ]);
-      } finally {
-        setGenerating(false);
-      }
-    } else {
-      await fetch("/api/saved", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jobId: job.id }),
-      });
+  const insight: (Insight & { id?: string }) | null = insightData?.id ? insightData : null;
+  const cv: (CVTailor & { id?: string }) | null = cvData?.id ? cvData : null;
+
+  const generateInsight = async () => {
+    setGeneratingInsight(true);
+    try {
+      const d = await fetch(`/api/jobs/${job.id}/insights`, { method: "POST" }).then((r) => r.json());
+      await mutateInsight(d);
+      setTab("overview");
+    } finally {
+      setGeneratingInsight(false);
     }
   };
+
+  const generateCV = async () => {
+    setGeneratingCV(true);
+    try {
+      const d = await fetch(`/api/jobs/${job.id}/cv`, { method: "POST" }).then((r) => r.json());
+      await mutateCV(d);
+    } finally {
+      setGeneratingCV(false);
+    }
+  };
+
+  const handleSave = async () => {
+    const next = !saved;
+    setSaved(next);
+    await fetch("/api/saved", {
+      method: next ? "POST" : "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ jobId: job.id }),
+    });
+  };
+
+  const scorePct = job.score != null ? Math.round(job.score * 100) : null;
+  const scoreClass = scorePct == null ? "pending" : scorePct >= 75 ? "high" : scorePct >= 50 ? "mid" : "low";
 
   return (
     <div className="app-content">
       <button className="btn" onClick={() => router.back()} style={{ marginBottom: 14 }}>← 回職缺流</button>
 
       <div className="detail">
-        {/* Header */}
+        {/* ── Header ── */}
         <div>
-          <h2 style={{ border: "none", padding: 0, margin: 0, fontSize: 22 }}>{job.title}</h2>
-          <div style={{ color: "var(--ink-2)", fontSize: 14, marginTop: 4 }}>
-            {job.company} · {job.city}, {job.country} · {job.remote}
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: 1 }}>
+              <h2 style={{ border: "none", padding: 0, margin: 0, fontSize: 22 }}>{job.title}</h2>
+              <div style={{ color: "var(--ink-2)", fontSize: 14, marginTop: 4 }}>
+                {job.company} · {job.city}, {job.country} · {job.remote}
+              </div>
+            </div>
+            <span className={`score-pill ${scoreClass}`} style={{ fontSize: 14, padding: "6px 16px" }}>
+              {scorePct != null ? `${scorePct} 分` : "— 分"}
+            </span>
           </div>
-          <div className="job-meta" style={{ marginTop: 8 }}>
+
+          <div className="job-meta" style={{ marginTop: 10 }}>
             <span>💼 {job.type}</span>
             <span>💰 {fmtSalary(job)}</span>
             {(job.yearsMin || job.yearsMax) && <span>👤 {job.yearsMin}–{job.yearsMax} yr</span>}
             <span>🕐 {relativeTime(job.postedAt ?? null)}</span>
-            {job.score != null && <span>🎯 匹配 {Math.round(job.score * 100)}</span>}
-          </div>
-          <div className="source-line" style={{ marginTop: 10 }}>
-            <span>來源: {sourceHost(job.sourceUrl)}</span>
-            <a href={job.sourceUrl} target="_blank" rel="noopener noreferrer">查看原文 ↗</a>
-            <span className="tag good">原始連結</span>
           </div>
 
-          {/* AI match analysis */}
-          {job.score != null && job.matchReasons.length > 0 && (
-            <div style={{ marginTop: 14, background: "oklch(95% .04 235)", border: "1px solid oklch(85% .06 235)", borderRadius: 8, padding: 14 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "oklch(45% .1 235)", marginBottom: 8, textTransform: "uppercase" }}>AI 適配分析</div>
-              <ul style={{ margin: 0, padding: "0 0 0 16px", fontSize: 13, color: "var(--ink-2)", lineHeight: 1.7 }}>
-                {job.matchReasons.map((r, i) => <li key={i}>{r}</li>)}
-              </ul>
-            </div>
-          )}
-
-          {/* Job description */}
-          <div style={{ marginTop: 14 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "var(--ink-3)", marginBottom: 6, textTransform: "uppercase" }}>職缺描述 JD</div>
-            <div style={{ background: "var(--bg-soft)", borderRadius: 8, padding: 14, fontSize: 13, color: "var(--ink-2)", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>
-              {job.description || "（無職缺描述）"}
-            </div>
-          </div>
-
-          <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button className={`btn star${saved ? " on" : ""}`} onClick={handleSave} disabled={generating}>
-              {generating
-                ? <><span className="spinner" style={{ width: 12, height: 12 }} /> 生成分析中…</>
-                : saved ? "★ 已收藏 — 面試策略已生成" : "☆ 收藏並生成面試策略"}
+          <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button className={`btn star${saved ? " on" : ""}`} onClick={handleSave}>
+              {saved ? "★ 已收藏" : "☆ 收藏"}
             </button>
             <a className="btn primary" href={job.sourceUrl} target="_blank" rel="noopener noreferrer">
               前往原始職缺 ↗
             </a>
+            <a className="btn" href={job.sourceUrl} target="_blank" rel="noopener noreferrer" style={{ fontSize: 12 }}>
+              {sourceHost(job.sourceUrl)} ↗
+            </a>
           </div>
         </div>
 
-        {/* Callout when not saved */}
-        {!saved && !insight && (
-          <div className="callout">
-            點擊「收藏」即觸發 Agent: SWOT 分析、風險清單、面經彙整、CV 客製版，通常 ≤ 30 秒完成。
-          </div>
-        )}
+        {/* ── Tabs ── */}
+        <div className="tab-nav" style={{ marginTop: 20 }}>
+          {([
+            ["overview", "概覽 / JD"],
+            ["swot", "SWOT 分析"],
+            ["risks", "風險評估"],
+            ["qa", "面試準備"],
+            ["cv", "CV 客製"],
+          ] as const).map(([k, l]) => (
+            <button key={k} className={`tab-btn${tab === k ? " active" : ""}`} onClick={() => setTab(k)}>{l}</button>
+          ))}
+        </div>
 
-        {/* Insights tabs */}
-        {insight && (
-          <>
-            <div className="tab-nav">
-              {([["strategy","面試策略 / SWOT"],["risks","風險"],["qa","面經 / 題庫"],["cv","CV 客製版"]] as const).map(([k,l]) => (
-                <button key={k} className={`tab-btn${tab === k ? " active" : ""}`} onClick={() => setTab(k)}>{l}</button>
-              ))}
-            </div>
+        {/* ── Overview Tab ── */}
+        {tab === "overview" && (
+          <div>
+            {/* Score breakdown */}
+            {job.matchReasons.length > 0 && (
+              <div style={{ marginBottom: 16, background: "oklch(95% .04 235)", border: "1px solid oklch(85% .06 235)", borderRadius: 8, padding: 14 }}>
+                <div className="eyebrow" style={{ color: "oklch(45% .1 235)", marginBottom: 8 }}>AI 適配分數解析</div>
+                <ul style={{ margin: 0, padding: "0 0 0 16px", fontSize: 13, color: "var(--ink-2)", lineHeight: 1.8 }}>
+                  {job.matchReasons.map((r, i) => <li key={i}>{r}</li>)}
+                </ul>
+              </div>
+            )}
 
-            {tab === "strategy" && (
-              <div>
-                <div className="swot">
-                  <div className="quad S"><h4>Strengths</h4><ul>{insight.swot.S.map((s,i) => <li key={i}>{s}</li>)}</ul></div>
-                  <div className="quad W"><h4>Weaknesses</h4><ul>{insight.swot.W.map((s,i) => <li key={i}>{s}</li>)}</ul></div>
-                  <div className="quad O"><h4>Opportunities</h4><ul>{insight.swot.O.map((s,i) => <li key={i}>{s}</li>)}</ul></div>
-                  <div className="quad T"><h4>Threats</h4><ul>{insight.swot.T.map((s,i) => <li key={i}>{s}</li>)}</ul></div>
+            {/* Company + industry trend (from insight) */}
+            {insight?.companyTrend && (
+              <div style={{ marginBottom: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div style={{ background: "var(--bg-soft)", borderRadius: 8, padding: 14 }}>
+                  <div className="eyebrow" style={{ marginBottom: 6 }}>公司趨勢</div>
+                  <p style={{ margin: 0, fontSize: 13, color: "var(--ink-2)", lineHeight: 1.6 }}>{insight.companyTrend}</p>
                 </div>
-                <div style={{ marginTop: 14 }}>
-                  <div className="eyebrow">建議策略</div>
-                  <p style={{ fontSize: 13.5 }}>{insight.strategy}</p>
+                <div style={{ background: "var(--bg-soft)", borderRadius: 8, padding: 14 }}>
+                  <div className="eyebrow" style={{ marginBottom: 6 }}>產業趨勢</div>
+                  <p style={{ margin: 0, fontSize: 13, color: "var(--ink-2)", lineHeight: 1.6 }}>{insight.industryTrend}</p>
                 </div>
               </div>
             )}
 
-            {tab === "risks" && (
+            {/* Generate button */}
+            {!insight && (
+              <div style={{ marginBottom: 16, padding: "14px 16px", background: "var(--bg-soft)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4 }}>AI 深度分析</div>
+                  <div style={{ fontSize: 12, color: "var(--ink-3)" }}>產業趨勢 · 公司展望 · SWOT · 面試準備 · CV 建議</div>
+                </div>
+                <button className="btn primary" onClick={generateInsight} disabled={generatingInsight} style={{ whiteSpace: "nowrap" }}>
+                  {generatingInsight
+                    ? <><span className="spinner" style={{ width: 12, height: 12 }} /> 分析中…</>
+                    : "生成 AI 分析"}
+                </button>
+              </div>
+            )}
+
+            {/* JD */}
+            <div className="eyebrow" style={{ marginBottom: 6 }}>職缺描述 JD</div>
+            <div style={{ background: "var(--bg-soft)", borderRadius: 8, padding: 14, fontSize: 13, color: "var(--ink-2)", whiteSpace: "pre-wrap", lineHeight: 1.6 }}>
+              {job.description || "（無職缺描述）"}
+            </div>
+          </div>
+        )}
+
+        {/* ── SWOT Tab ── */}
+        {tab === "swot" && (
+          <div>
+            {!insight && <GeneratePrompt loading={generatingInsight} onGenerate={generateInsight} />}
+            {insight && (
+              <>
+                <div style={{ marginBottom: 14, padding: "12px 14px", background: "var(--bg-soft)", borderRadius: 8, fontSize: 13, color: "var(--ink-2)", lineHeight: 1.6 }}>
+                  <span style={{ fontWeight: 600, color: "var(--ink)", marginRight: 8 }}>投遞建議</span>{insight.strategy}
+                </div>
+                <div className="swot">
+                  <div className="quad S"><h4>優勢 S</h4><ul>{insight.swot.S.map((s, i) => <li key={i}>{s}</li>)}</ul></div>
+                  <div className="quad W"><h4>弱點 W</h4><ul>{insight.swot.W.map((s, i) => <li key={i}>{s}</li>)}</ul></div>
+                  <div className="quad O"><h4>機會 O</h4><ul>{insight.swot.O.map((s, i) => <li key={i}>{s}</li>)}</ul></div>
+                  <div className="quad T"><h4>威脅 T</h4><ul>{insight.swot.T.map((s, i) => <li key={i}>{s}</li>)}</ul></div>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ── Risks Tab ── */}
+        {tab === "risks" && (
+          <div>
+            {!insight && <GeneratePrompt loading={generatingInsight} onGenerate={generateInsight} />}
+            {insight && (
               <div className="risks">
                 {insight.risks.map((r, i) => (
                   <div className="risk" key={i}>
@@ -147,10 +207,16 @@ export function JobDetail({ job }: { job: Job }) {
                 ))}
               </div>
             )}
+          </div>
+        )}
 
-            {tab === "qa" && (
-              <div>
-                <div className="eyebrow" style={{ marginBottom: 6 }}>常見題目 / 回答骨架</div>
+        {/* ── QA Tab ── */}
+        {tab === "qa" && (
+          <div>
+            {!insight && <GeneratePrompt loading={generatingInsight} onGenerate={generateInsight} />}
+            {insight && (
+              <>
+                <div className="eyebrow" style={{ marginBottom: 10 }}>常見面試題 / 回答骨架</div>
                 <div className="qa-list">
                   {insight.questions.map((qa, i) => (
                     <div className="qa" key={i}>
@@ -159,25 +225,24 @@ export function JobDetail({ job }: { job: Job }) {
                     </div>
                   ))}
                 </div>
-                {insight.refs.length > 0 && (
-                  <>
-                    <div className="eyebrow" style={{ marginTop: 14, marginBottom: 6 }}>外部資料 / 面經</div>
-                    <div className="refs-list">
-                      {insight.refs.map((r, i) => (
-                        <a key={i} href={r.url} target="_blank" rel="noopener noreferrer">
-                          <span className="ref-source">[{r.source}]</span>
-                          <span style={{ color: "var(--ink)" }}>{r.title}</span>
-                          <span style={{ marginLeft: "auto" }}>↗</span>
-                        </a>
-                      ))}
-                    </div>
-                  </>
-                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* ── CV Tab ── */}
+        {tab === "cv" && (
+          <div>
+            {!cv && (
+              <div style={{ marginBottom: 16, padding: "14px 16px", background: "var(--bg-soft)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                <div style={{ fontSize: 13, color: "var(--ink-2)" }}>根據此職缺 JD，AI 將協助客製化你的履歷摘要與重點</div>
+                <button className="btn primary" onClick={generateCV} disabled={generatingCV} style={{ whiteSpace: "nowrap" }}>
+                  {generatingCV ? <><span className="spinner" style={{ width: 12, height: 12 }} /> 生成中…</> : "生成 CV 客製版"}
+                </button>
               </div>
             )}
-
-            {tab === "cv" && cv && (
-              <div>
+            {cv && (
+              <>
                 <div className="callout">{cv.diffNote}</div>
                 <div style={{ marginTop: 12 }}>
                   <div className="eyebrow">Summary</div>
@@ -187,7 +252,7 @@ export function JobDetail({ job }: { job: Job }) {
                   </div>
                 </div>
                 {(cv.bullets as { before: string; after: string }[]).map((b, i) => (
-                  <div key={i}>
+                  <div key={i} style={{ marginTop: 12 }}>
                     <div className="eyebrow">Bullet {i + 1}</div>
                     <div className="diff-block">
                       <div className="diff-side before"><div className="lbl">Before</div>{b.before}</div>
@@ -195,21 +260,27 @@ export function JobDetail({ job }: { job: Job }) {
                     </div>
                   </div>
                 ))}
-                <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 8, marginTop: 14, flexWrap: "wrap" }}>
                   <button className="btn primary" onClick={() => window.print()}>列印 / 下載 PDF</button>
-                  <button className="btn">駁回</button>
                 </div>
-              </div>
+              </>
             )}
-
-            {tab === "cv" && !cv && (
-              <div style={{ textAlign: "center", padding: 24, color: "var(--ink-3)" }}>
-                {generating ? <><div className="spinner" style={{ margin: "0 auto 8px" }} /><div>生成 CV 客製版中…</div></> : "尚未生成"}
-              </div>
-            )}
-          </>
+          </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function GeneratePrompt({ loading, onGenerate }: { loading: boolean; onGenerate: () => void }) {
+  return (
+    <div style={{ textAlign: "center", padding: "32px 16px", color: "var(--ink-3)" }}>
+      <div style={{ fontSize: 32, marginBottom: 12 }}>🤖</div>
+      <div style={{ fontWeight: 600, marginBottom: 6, color: "var(--ink)" }}>尚未生成 AI 分析</div>
+      <div style={{ fontSize: 13, marginBottom: 16 }}>點擊「生成 AI 分析」後所有分頁同時解鎖</div>
+      <button className="btn primary" onClick={onGenerate} disabled={loading}>
+        {loading ? <><span className="spinner" style={{ width: 12, height: 12 }} /> 分析中…</> : "生成 AI 分析"}
+      </button>
     </div>
   );
 }

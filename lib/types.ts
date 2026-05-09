@@ -82,6 +82,8 @@ export interface SavedJob {
 export type SWOTKey = "S" | "W" | "O" | "T";
 
 export interface Insight {
+  companyTrend?: string;
+  industryTrend?: string;
   swot: Record<SWOTKey, string[]>;
   risks: { label: string; severity: "high" | "med" | "low"; note: string }[];
   strategy: string;

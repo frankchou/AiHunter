@@ -181,3 +181,9 @@ model CVTailor {
 
   @@unique([userId, jobId])
 }
+
+model IndustryCache {
+  industry  String   @id
+  data      Json
+  updatedAt DateTime @default(now())
+}

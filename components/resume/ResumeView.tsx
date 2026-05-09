@@ -177,6 +177,15 @@ export function ResumeView() {
               </div>
 
               {/* AI Analysis — SWOT */}
+              {!analysis && (
+                <div style={{ marginTop: 16, padding: "12px 14px", background: "var(--bg-soft)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+                  <div style={{ fontSize: 13, color: "var(--ink-2)" }}>尚無 AI 履歷分析，點擊生成 SWOT 分析與改善建議</div>
+                  <button className="btn primary" style={{ whiteSpace: "nowrap" }}
+                    onClick={() => parsed && runAnalysis(parsed)}>
+                    立即分析
+                  </button>
+                </div>
+              )}
               {analysis && (
                 <div style={{ marginTop: 20 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>

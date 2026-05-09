@@ -3,50 +3,86 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { INDUSTRIES } from "@/lib/mock-data";
+import Anthropic from "@anthropic-ai/sdk";
+
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const CACHE_TTL_DAYS = 7;
+
+const INDUSTRY_LABELS: Record<string, string> = {
+  "tech.saas": "SaaS / Cloud / Enterprise Software",
+  "tech.consumer": "Consumer Tech / Mobile / E-commerce",
+  "ai": "Artificial Intelligence / Machine Learning",
+  "fintech": "FinTech / Financial Services",
+  "health": "Healthcare / BioTech / MedTech",
+  "retail": "Retail / Logistics / Supply Chain",
+};
+
+async function generateIndustryTop(industry: string): Promise<object> {
+  const label = INDUSTRY_LABELS[industry] ?? industry;
+  const prompt = `You are a career and industry expert. List the top 20 global companies in the "${label}" industry that job seekers should target.
+
+For each company provide honest, actionable info for job seekers. Respond in JSON only:
+{
+  "companies": [
+    {
+      "rank": 1,
+      "name": "Company Name",
+      "ticker": "TICKER or null",
+      "region": "US | TW | Global | APAC | EU",
+      "pros": ["hiring culture pro 1 in zh-TW", "pro 2", "pro 3"],
+      "cons": ["hiring culture con 1 in zh-TW", "con 2"],
+      "profile": "2-sentence company profile for job seekers in zh-TW",
+      "trend": "1-sentence future trend / hiring outlook in zh-TW"
+    }
+  ]
+}
+
+Focus on: compensation, work culture, growth opportunities, job stability. Include a mix of global giants and rising companies. All text fields in zh-TW except company names and tickers.`;
+
+  const msg = await client.messages.create({
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 4096,
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  const raw = (msg.content[0] as { type: string; text: string }).text;
+  const start = raw.indexOf("{");
+  const end = raw.lastIndexOf("}");
+  return JSON.parse(raw.slice(start, end + 1));
+}
 
 export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const industry = req.nextUrl.searchParams.get("industry") ?? "tech.saas";
+  const forceRefresh = req.nextUrl.searchParams.get("refresh") === "1";
 
   try {
-    // Aggregate top companies in this industry from real job data
-    const jobs = await prisma.job.findMany({
-      where: { industry },
-      select: { company: true, ticker: true, score: true, title: true, country: true, city: true },
-    });
-
-    // Group by company, count jobs, avg score
-    const companyMap = new Map<string, { count: number; scores: number[]; ticker: string | null; locations: Set<string>; titles: string[] }>();
-    for (const j of jobs) {
-      const key = j.company;
-      if (!companyMap.has(key)) {
-        companyMap.set(key, { count: 0, scores: [], ticker: j.ticker, locations: new Set(), titles: [] });
+    // Check cache
+    if (!forceRefresh) {
+      const cached = await prisma.industryCache.findUnique({ where: { industry } });
+      if (cached) {
+        const ageMs = Date.now() - cached.updatedAt.getTime();
+        if (ageMs < CACHE_TTL_DAYS * 24 * 60 * 60 * 1000) {
+          return NextResponse.json({ ...(cached.data as object), industries: INDUSTRIES, cached: true });
+        }
       }
-      const entry = companyMap.get(key)!;
-      entry.count++;
-      if (j.score != null) entry.scores.push(j.score);
-      if (j.city && j.country) entry.locations.add(`${j.city}, ${j.country}`);
-      if (j.title) entry.titles.push(j.title);
     }
 
-    const companies = Array.from(companyMap.entries())
-      .map(([name, d]) => ({
-        rank: 0,
-        name,
-        ticker: d.ticker ?? "—",
-        jobCount: d.count,
-        avgScore: d.scores.length ? Math.round((d.scores.reduce((a, b) => a + b, 0) / d.scores.length) * 100) : null,
-        locations: [...d.locations].slice(0, 3).join(" · ") || "—",
-        sampleTitles: [...new Set(d.titles)].slice(0, 3),
-      }))
-      .sort((a, b) => (b.avgScore ?? 0) - (a.avgScore ?? 0) || b.jobCount - a.jobCount)
-      .slice(0, 100)
-      .map((c, i) => ({ ...c, rank: i + 1 }));
+    // Generate with AI
+    const data = await generateIndustryTop(industry);
 
-    return NextResponse.json({ companies, industries: INDUSTRIES });
-  } catch {
-    return NextResponse.json({ companies: [], industries: INDUSTRIES });
+    // Cache result
+    await prisma.industryCache.upsert({
+      where: { industry },
+      create: { industry, data },
+      update: { data, updatedAt: new Date() },
+    });
+
+    return NextResponse.json({ ...(data as object), industries: INDUSTRIES, cached: false });
+  } catch (e) {
+    console.error("[industries]", e);
+    return NextResponse.json({ companies: [], industries: INDUSTRIES, error: String(e) });
   }
 }
