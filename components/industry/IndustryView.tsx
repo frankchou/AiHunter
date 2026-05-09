@@ -1,7 +1,8 @@
 "use client";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import useSWR from "swr";
 import { INDUSTRIES } from "@/lib/mock-data";
+import type { StockQuote } from "@/app/api/stocks/route";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
@@ -16,6 +17,21 @@ interface AiCompany {
   trend: string;
 }
 
+function PriceCell({ quote }: { quote: StockQuote | undefined }) {
+  if (!quote) return <span style={{ color: "var(--ink-4)", fontSize: 11 }}>—</span>;
+  const up = quote.change1d >= 0;
+  return (
+    <div>
+      <div style={{ fontWeight: 600, fontSize: 13, fontFamily: "var(--font-mono)" }}>
+        {quote.currency === "USD" ? "$" : ""}{quote.price.toLocaleString()}
+      </div>
+      <div style={{ fontSize: 11, color: up ? "#22c55e" : "#ef4444", marginTop: 2 }}>
+        {up ? "▲" : "▼"} {Math.abs(quote.change1d)}%
+      </div>
+    </div>
+  );
+}
+
 export function IndustryView() {
   const [selectedIndustry, setSelectedIndustry] = useState(INDUSTRIES[0].id);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -27,6 +43,17 @@ export function IndustryView() {
   );
 
   const companies = data?.companies ?? [];
+
+  // Collect all non-null tickers and fetch prices
+  const tickerStr = useMemo(
+    () => companies.map((c) => c.ticker).filter(Boolean).join(","),
+    [companies]
+  );
+  const { data: stockData } = useSWR<Record<string, StockQuote>>(
+    tickerStr ? `/api/stocks?symbols=${tickerStr}` : null,
+    fetcher,
+    { revalidateOnFocus: false, refreshInterval: 300_000 }
+  );
 
   return (
     <div className="app-content">
@@ -45,7 +72,7 @@ export function IndustryView() {
         {INDUSTRIES.map((ind) => (
           <span key={ind.id}
             className={`chip${selectedIndustry === ind.id ? " active" : ""}`}
-            onClick={() => setSelectedIndustry(ind.id)}>
+            onClick={() => { setSelectedIndustry(ind.id); }}>
             {ind.name}
           </span>
         ))}
@@ -70,16 +97,23 @@ export function IndustryView() {
           <table>
             <thead>
               <tr>
-                <th>#</th>
+                <th style={{ width: 32 }}>#</th>
                 <th>公司</th>
-                <th>地區</th>
+                <th style={{ width: 70 }}>地區</th>
+                <th style={{ width: 110 }}>股價</th>
                 <th>求職優點</th>
                 <th>求職缺點</th>
                 <th>未來趨勢</th>
               </tr>
             </thead>
             <tbody>
-              {companies.map((c) => <CompanyRow key={c.name} company={c} />)}
+              {companies.map((c) => (
+                <CompanyRow
+                  key={c.name}
+                  company={c}
+                  quote={c.ticker ? stockData?.[c.ticker] : undefined}
+                />
+              ))}
             </tbody>
           </table>
         </div>
@@ -88,7 +122,7 @@ export function IndustryView() {
   );
 }
 
-function CompanyRow({ company: c }: { company: AiCompany }) {
+function CompanyRow({ company: c, quote }: { company: AiCompany; quote: StockQuote | undefined }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -101,6 +135,9 @@ function CompanyRow({ company: c }: { company: AiCompany }) {
         </td>
         <td>
           <span className="tag" style={{ fontSize: 10 }}>{c.region}</span>
+        </td>
+        <td onClick={(e) => e.stopPropagation()}>
+          <PriceCell quote={quote} />
         </td>
         <td>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
@@ -118,7 +155,7 @@ function CompanyRow({ company: c }: { company: AiCompany }) {
             {c.cons.length > 1 && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>+{c.cons.length - 1}</span>}
           </div>
         </td>
-        <td style={{ fontSize: 12, color: "var(--ink-2)", maxWidth: 220 }}>
+        <td style={{ fontSize: 12, color: "var(--ink-2)", maxWidth: 200 }}>
           <span style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
             {c.trend}
           </span>
@@ -126,7 +163,7 @@ function CompanyRow({ company: c }: { company: AiCompany }) {
       </tr>
       {expanded && (
         <tr>
-          <td colSpan={6} style={{ background: "var(--bg-soft)", padding: "14px 18px" }}>
+          <td colSpan={7} style={{ background: "var(--bg-soft)", padding: "14px 18px" }}>
             <div style={{ fontSize: 13, color: "var(--ink-2)", marginBottom: 10, lineHeight: 1.6 }}>
               <span className="eyebrow" style={{ marginRight: 8 }}>公司簡介</span>{c.profile}
             </div>

@@ -14,9 +14,10 @@ export async function generateMetadata() {
 
 export default async function JobDetailPage({ params }: Props) {
   let job: Job | null = null;
+  const jobId = decodeURIComponent(params.id);
 
   try {
-    const dbJob = await prisma.job.findUnique({ where: { id: params.id } });
+    const dbJob = await prisma.job.findUnique({ where: { id: jobId } });
     if (dbJob) {
       job = {
         id: dbJob.id,
