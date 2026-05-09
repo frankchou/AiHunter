@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { MOCK_JOBS, getMockCV } from "@/lib/mock-data";
 import { generateCVTailor } from "@/lib/ai/cv-tailor";
-import { getPlan, checkLimit, currentMonth } from "@/lib/plans";
+import { consumeUsage } from "@/lib/billing";
 import type { ParsedResume, Job } from "@/lib/types";
 
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
@@ -24,30 +24,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  // Check plan limits
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: { email: true, planTier: true, cvTailorsUsed: true, adUnlocksUsed: true, usageMonth: true },
-  });
-  const isOwner = user?.email === (process.env.OWNER_EMAIL ?? "frank200231@gmail.com");
-  if (user && !isOwner) {
-    const plan = getPlan(user.planTier);
-    const { allowed, resetNeeded } = checkLimit({
-      used: user.cvTailorsUsed,
-      adUnlocks: 0, // ad unlock only applies to insights
-      limit: plan.limits.cvTailorsPerMonth,
-      usageMonth: user.usageMonth,
-    });
-    if (!allowed) {
-      return NextResponse.json({ error: "LIMIT_REACHED", planTier: user.planTier }, { status: 402 });
-    }
-    await prisma.user.update({
-      where: { id: session.user.id },
-      data: {
-        cvTailorsUsed: resetNeeded ? 1 : { increment: 1 },
-        usageMonth: resetNeeded ? currentMonth() : undefined,
-      },
-    });
+  // Check plan limits (owner bypass + ticket fallback handled inside consumeUsage)
+  const bill = await consumeUsage(session.user.id, "cv");
+  if (!bill.ok) {
+    return NextResponse.json({
+      error: "LIMIT_REACHED",
+      planTier: bill.planTier,
+      tickets: bill.tickets,
+      adSessionsLeft: bill.adSessionsLeft,
+    }, { status: 402 });
   }
 
   try {

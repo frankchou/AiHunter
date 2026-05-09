@@ -60,7 +60,8 @@ model User {
   analysisUsed         Int          @default(0)
   insightsUsed         Int          @default(0)
   cvTailorsUsed        Int          @default(0)
-  adUnlocksUsed        Int          @default(0)         // ad-unlocked extras this month
+  adUnlocksUsed        Int          @default(0)         // ad sessions watched this month (cap: 5, resets monthly)
+  adTickets            Int          @default(0)         // spendable ticket balance (persistent across months)
   createdAt            DateTime     @default(now())
   accounts        Account[]
   sessions        Session[]

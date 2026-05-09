@@ -4,6 +4,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { analyzeResume } from "@/lib/ai/resume-analyzer";
+import { consumeUsage } from "@/lib/billing";
 import type { ParsedResume, ResumeAnalysis } from "@/lib/types";
 
 function hashParsed(parsed: ParsedResume): string {
@@ -27,11 +28,22 @@ export async function POST(req: NextRequest) {
   });
 
   if (resume?.analysis && resume.parsedHash === incomingHash) {
-    // Content unchanged — return cached result
+    // Content unchanged — return cached result (no ticket cost for cache hit)
     return NextResponse.json(resume.analysis);
   }
 
-  // Content changed or no cache — run Claude
+  // Content changed or no cache — check billing before running Claude
+  const bill = await consumeUsage(session.user.id, "analysis");
+  if (!bill.ok) {
+    return NextResponse.json({
+      error: "LIMIT_REACHED",
+      planTier: bill.planTier,
+      tickets: bill.tickets,
+      adSessionsLeft: bill.adSessionsLeft,
+    }, { status: 402 });
+  }
+
+  // Run Claude
   try {
     const analysis = await analyzeResume(parsed);
 

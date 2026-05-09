@@ -2,7 +2,10 @@
 import { useState, useRef, useCallback } from "react";
 import useSWR from "swr";
 import { INDUSTRIES, WORLD_LOCATIONS } from "@/lib/mock-data";
+import { AdWatcher } from "@/components/subscription/AdWatcher";
 import type { ParsedResume, ResumeAnalysis } from "@/lib/types";
+
+interface LimitInfo { planTier: string; tickets: number; adSessionsLeft: number }
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
@@ -25,6 +28,10 @@ export function ResumeView() {
   const [analyzing, setAnalyzing] = useState(false);
   const [text, setText] = useState("");
   const [showRaw, setShowRaw] = useState(false);
+  const [parseLimit, setParseLimit]     = useState<LimitInfo | null>(null);
+  const [analyzeLimit, setAnalyzeLimit] = useState<LimitInfo | null>(null);
+  const [adWatching, setAdWatching]     = useState<"parse" | "analyze" | null>(null);
+  const [pendingParsed, setPendingParsed] = useState<ParsedResume | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const downloadOriginal = useCallback(() => {
@@ -66,12 +73,19 @@ export function ResumeView() {
 
   const runAnalysis = async (parsed: ParsedResume) => {
     setAnalyzing(true);
+    setAnalyzeLimit(null);
     try {
-      await fetch("/api/resume/analyze", {
+      const r = await fetch("/api/resume/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ parsed }),
       });
+      if (r.status === 402) {
+        const data = await r.json();
+        setAnalyzeLimit(data);
+        setPendingParsed(parsed);
+        return;
+      }
       await mutateResume();
     } finally {
       setAnalyzing(false);
@@ -80,12 +94,19 @@ export function ResumeView() {
 
   const parseAndSave = async (rawText: string, fileName?: string) => {
     setParsing(true);
+    setParseLimit(null);
     try {
       const r = await fetch("/api/resume/parse", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: rawText }),
       });
+      if (r.status === 402) {
+        const data = await r.json();
+        setParseLimit(data);
+        setParsing(false);
+        return;
+      }
       const { parsed } = await r.json();
       await fetch("/api/resume", {
         method: "POST",
@@ -103,8 +124,15 @@ export function ResumeView() {
     const fd = new FormData();
     fd.append("file", file);
     setParsing(true);
+    setParseLimit(null);
     try {
       const r = await fetch("/api/resume/parse", { method: "POST", body: fd });
+      if (r.status === 402) {
+        const data = await r.json();
+        setParseLimit(data);
+        setParsing(false);
+        return;
+      }
       if (!r.ok) throw new Error(`Parse failed: ${r.status}`);
       const { rawText, parsed, fileName, fileData, fileMime } = await r.json();
       await fetch("/api/resume", {
@@ -132,6 +160,48 @@ export function ResumeView() {
           {resumeData ? `${resumeData.fileName ?? "履歷"} · v${resumeData.version} · 已啟用` : "尚未建立履歷"}
         </span>
       </div>
+
+      {/* Limit banners */}
+      {(parseLimit || analyzeLimit) && !adWatching && (
+        <div style={{ marginBottom: 16, padding: "14px 16px", background: "oklch(98% .02 30)", border: "1px solid oklch(88% .06 30)", borderRadius: 8 }}>
+          <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4, color: "oklch(40% .12 30)" }}>
+            {parseLimit ? "本月履歷解析次數已用完" : "本月 AI 分析次數已用完"}
+          </div>
+          <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 8 }}>
+            解析券：<b>{(parseLimit ?? analyzeLimit)!.tickets}</b> 張
+            {(parseLimit ?? analyzeLimit)!.planTier === "free" && (
+              <>　·　廣告解鎖剩餘：<b>{(parseLimit ?? analyzeLimit)!.adSessionsLeft}</b> 次</>
+            )}
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {(parseLimit ?? analyzeLimit)!.planTier === "free" && (parseLimit ?? analyzeLimit)!.adSessionsLeft > 0 && (
+              <button className="btn primary" style={{ fontSize: 13 }}
+                onClick={() => setAdWatching(parseLimit ? "parse" : "analyze")}>
+                📺 看廣告獲得 +1 解析券
+              </button>
+            )}
+            <a className="btn" href="/pricing" style={{ fontSize: 13 }}>🚀 升級方案</a>
+          </div>
+        </div>
+      )}
+      {adWatching && (
+        <div style={{ marginBottom: 16 }}>
+          <AdWatcher
+            ticketCost={1}
+            onComplete={() => {
+              const feature = adWatching;
+              setAdWatching(null);
+              if (feature === "parse") {
+                setParseLimit(null);
+              } else {
+                setAnalyzeLimit(null);
+                if (pendingParsed) runAnalysis(pendingParsed);
+              }
+            }}
+            onCancel={() => setAdWatching(null)}
+          />
+        </div>
+      )}
 
       <div className="resume-grid">
         {/* Left: resume */}
@@ -177,7 +247,7 @@ export function ResumeView() {
               </div>
 
               {/* AI Analysis — SWOT */}
-              {!analysis && (
+              {!analysis && !analyzeLimit && (
                 <div style={{ marginTop: 16, padding: "12px 14px", background: "var(--bg-soft)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
                   <div style={{ fontSize: 13, color: "var(--ink-2)" }}>尚無 AI 履歷分析，點擊生成 SWOT 分析與改善建議</div>
                   <button className="btn primary" style={{ whiteSpace: "nowrap" }}

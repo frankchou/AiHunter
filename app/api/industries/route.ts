@@ -3,6 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { INDUSTRIES } from "@/lib/mock-data";
+import { consumeUsage } from "@/lib/billing";
 import Anthropic from "@anthropic-ai/sdk";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -57,6 +58,20 @@ export async function GET(req: NextRequest) {
 
   const industry = req.nextUrl.searchParams.get("industry") ?? "tech.saas";
   const forceRefresh = req.nextUrl.searchParams.get("refresh") === "1";
+
+  // Force-refresh costs 3 tickets for free users (Pro/Max unlimited)
+  if (forceRefresh) {
+    const bill = await consumeUsage(session.user.id, "industryRefresh");
+    if (!bill.ok) {
+      return NextResponse.json({
+        error: "LIMIT_REACHED",
+        planTier: bill.planTier,
+        tickets: bill.tickets,
+        adSessionsLeft: bill.adSessionsLeft,
+        ticketCost: 3,
+      }, { status: 402 });
+    }
+  }
 
   try {
     // Check cache

@@ -2,10 +2,21 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { parseResumeText } from "@/lib/ai/resume-parser";
+import { consumeUsage } from "@/lib/billing";
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const bill = await consumeUsage(session.user.id, "analysis");
+  if (!bill.ok) {
+    return NextResponse.json({
+      error: "LIMIT_REACHED",
+      planTier: bill.planTier,
+      tickets: bill.tickets,
+      adSessionsLeft: bill.adSessionsLeft,
+    }, { status: 402 });
+  }
 
   const contentType = req.headers.get("content-type") ?? "";
 

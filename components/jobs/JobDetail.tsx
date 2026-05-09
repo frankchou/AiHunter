@@ -1,12 +1,14 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { fmtSalary, sourceHost, relativeTime } from "@/lib/utils";
-import { AD_DURATION_SEC } from "@/lib/plans";
+import { AdWatcher } from "@/components/subscription/AdWatcher";
 import type { Job, Insight, CVTailor } from "@/lib/types";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
+
+interface LimitInfo { planTier: string; tickets: number; adSessionsLeft: number }
 
 export function JobDetail({ job }: { job: Job }) {
   const router = useRouter();
@@ -15,36 +17,23 @@ export function JobDetail({ job }: { job: Job }) {
   const [generatingCV, setGeneratingCV] = useState(false);
   const [tab, setTab] = useState<"overview" | "swot" | "risks" | "qa" | "cv">("overview");
 
-  // Limit state — set when API returns 402
-  const [insightLimit, setInsightLimit] = useState<{ planTier: string } | null>(null);
-  const [cvLimit, setCvLimit] = useState<{ planTier: string } | null>(null);
-
-  // Inline ad countdown
-  const [adWatching, setAdWatching] = useState<"insight" | "cv" | null>(null);
-  const [adCountdown, setAdCountdown] = useState(AD_DURATION_SEC);
-  const adTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [insightLimit, setInsightLimit] = useState<LimitInfo | null>(null);
+  const [cvLimit, setCvLimit]           = useState<LimitInfo | null>(null);
+  const [adWatching, setAdWatching]     = useState<"insight" | "cv" | null>(null);
 
   const { data: insightData, mutate: mutateInsight } = useSWR<Insight & { id?: string }>(
-    `/api/jobs/${job.id}/insights`,
-    fetcher,
-    { revalidateOnFocus: false }
+    `/api/jobs/${job.id}/insights`, fetcher, { revalidateOnFocus: false }
   );
   const { data: cvData, mutate: mutateCV } = useSWR<CVTailor & { id?: string }>(
-    `/api/jobs/${job.id}/cv`,
-    fetcher,
-    { revalidateOnFocus: false }
+    `/api/jobs/${job.id}/cv`, fetcher, { revalidateOnFocus: false }
   );
   const { data: savedData } = useSWR<{ saved: boolean }>(
-    `/api/saved/check?jobId=${job.id}`,
-    fetcher,
-    { revalidateOnFocus: false }
+    `/api/saved/check?jobId=${job.id}`, fetcher, { revalidateOnFocus: false }
   );
 
   useEffect(() => {
     if (savedData?.saved != null) setSaved(savedData.saved);
   }, [savedData]);
-
-  useEffect(() => () => { if (adTimerRef.current) clearInterval(adTimerRef.current); }, []);
 
   const insight: (Insight & { id?: string }) | null = insightData?.id ? insightData : null;
   const cv: (CVTailor & { id?: string }) | null = cvData?.id ? cvData : null;
@@ -55,8 +44,8 @@ export function JobDetail({ job }: { job: Job }) {
     try {
       const res = await fetch(`/api/jobs/${job.id}/insights`, { method: "POST" });
       if (res.status === 402) {
-        const { planTier } = await res.json();
-        setInsightLimit({ planTier });
+        const data = await res.json();
+        setInsightLimit(data);
         return;
       }
       await mutateInsight(await res.json());
@@ -72,37 +61,14 @@ export function JobDetail({ job }: { job: Job }) {
     try {
       const res = await fetch(`/api/jobs/${job.id}/cv`, { method: "POST" });
       if (res.status === 402) {
-        const { planTier } = await res.json();
-        setCvLimit({ planTier });
+        const data = await res.json();
+        setCvLimit(data);
         return;
       }
       await mutateCV(await res.json());
     } finally {
       setGeneratingCV(false);
     }
-  };
-
-  const startAd = (feature: "insight" | "cv") => {
-    setAdWatching(feature);
-    setAdCountdown(AD_DURATION_SEC);
-    adTimerRef.current = setInterval(() => {
-      setAdCountdown((c) => {
-        if (c <= 1) {
-          clearInterval(adTimerRef.current!);
-          handleAdComplete(feature);
-          return 0;
-        }
-        return c - 1;
-      });
-    }, 1000);
-  };
-
-  const handleAdComplete = async (feature: "insight" | "cv") => {
-    // In production: replace with real ad SDK verification token
-    await fetch("/api/ads/unlock", { method: "POST" });
-    setAdWatching(null);
-    if (feature === "insight") generateInsight();
-    else generateCV();
   };
 
   const handleSave = async () => {
@@ -200,9 +166,10 @@ export function JobDetail({ job }: { job: Job }) {
                 loading={generatingInsight}
                 limit={insightLimit}
                 watching={adWatching === "insight"}
-                countdown={adCountdown}
                 onGenerate={generateInsight}
-                onWatchAd={() => startAd("insight")}
+                onWatchAd={() => setAdWatching("insight")}
+                onAdComplete={() => { setAdWatching(null); generateInsight(); }}
+                onAdCancel={() => setAdWatching(null)}
               />
             )}
 
@@ -218,12 +185,12 @@ export function JobDetail({ job }: { job: Job }) {
           <div>
             {!insight && (
               <GeneratePrompt
-                loading={generatingInsight}
-                limit={insightLimit}
+                loading={generatingInsight} limit={insightLimit}
                 watching={adWatching === "insight"}
-                countdown={adCountdown}
                 onGenerate={generateInsight}
-                onWatchAd={() => startAd("insight")}
+                onWatchAd={() => setAdWatching("insight")}
+                onAdComplete={() => { setAdWatching(null); generateInsight(); }}
+                onAdCancel={() => setAdWatching(null)}
               />
             )}
             {insight && (
@@ -247,12 +214,12 @@ export function JobDetail({ job }: { job: Job }) {
           <div>
             {!insight && (
               <GeneratePrompt
-                loading={generatingInsight}
-                limit={insightLimit}
+                loading={generatingInsight} limit={insightLimit}
                 watching={adWatching === "insight"}
-                countdown={adCountdown}
                 onGenerate={generateInsight}
-                onWatchAd={() => startAd("insight")}
+                onWatchAd={() => setAdWatching("insight")}
+                onAdComplete={() => { setAdWatching(null); generateInsight(); }}
+                onAdCancel={() => setAdWatching(null)}
               />
             )}
             {insight && (
@@ -273,12 +240,12 @@ export function JobDetail({ job }: { job: Job }) {
           <div>
             {!insight && (
               <GeneratePrompt
-                loading={generatingInsight}
-                limit={insightLimit}
+                loading={generatingInsight} limit={insightLimit}
                 watching={adWatching === "insight"}
-                countdown={adCountdown}
                 onGenerate={generateInsight}
-                onWatchAd={() => startAd("insight")}
+                onWatchAd={() => setAdWatching("insight")}
+                onAdComplete={() => { setAdWatching(null); generateInsight(); }}
+                onAdCancel={() => setAdWatching(null)}
               />
             )}
             {insight && (
@@ -302,12 +269,12 @@ export function JobDetail({ job }: { job: Job }) {
           <div>
             {!cv && (
               <CVGate
-                loading={generatingCV}
-                limit={cvLimit}
+                loading={generatingCV} limit={cvLimit}
                 watching={adWatching === "cv"}
-                countdown={adCountdown}
                 onGenerate={generateCV}
-                onWatchAd={() => startAd("cv")}
+                onWatchAd={() => setAdWatching("cv")}
+                onAdComplete={() => { setAdWatching(null); generateCV(); }}
+                onAdCancel={() => setAdWatching(null)}
               />
             )}
             {cv && (
@@ -341,65 +308,57 @@ export function JobDetail({ job }: { job: Job }) {
   );
 }
 
-// ── Shared ad/limit UI pieces ─────────────────────────────────────────
+// ── Shared gate UI pieces ─────────────────────────────────────────────────────
 
 interface GateProps {
   loading: boolean;
-  limit: { planTier: string } | null;
+  limit: LimitInfo | null;
   watching: boolean;
-  countdown: number;
   onGenerate: () => void;
   onWatchAd: () => void;
+  onAdComplete: () => void;
+  onAdCancel: () => void;
 }
 
-function AdCountdownBar({ countdown }: { countdown: number }) {
-  const pct = Math.round((countdown / AD_DURATION_SEC) * 100);
+function LimitBanner({ limit, onWatchAd, onAdComplete, onAdCancel, watching, ticketCost = 1 }: {
+  limit: LimitInfo; watching: boolean; ticketCost?: number;
+  onWatchAd: () => void; onAdComplete: () => void; onAdCancel: () => void;
+}) {
+  if (watching) return <AdWatcher ticketCost={ticketCost} onComplete={onAdComplete} onCancel={onAdCancel} />;
+
   return (
-    <div style={{ background: "var(--bg-soft)", border: "1px solid var(--line)", borderRadius: 8, padding: "14px 16px" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-        <span style={{ fontSize: 13, color: "var(--ink-2)" }}>廣告播放中，請稍候…</span>
-        <span style={{ fontWeight: 700, fontSize: 18, color: "var(--primary)", minWidth: 32, textAlign: "right" }}>{countdown}s</span>
+    <div style={{ padding: "14px 16px", background: "oklch(98% .02 30)", border: "1px solid oklch(88% .06 30)", borderRadius: 8 }}>
+      <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 4, color: "oklch(40% .12 30)" }}>
+        本月次數已用完
       </div>
-      <div style={{ height: 4, background: "var(--line)", borderRadius: 2, overflow: "hidden" }}>
-        <div style={{ height: "100%", width: `${pct}%`, background: "var(--primary)", transition: "width 1s linear", borderRadius: 2 }} />
+      <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 6 }}>
+        解析券：<b>{limit.tickets}</b> 張
+        {limit.planTier === "free" && <>　·　本月廣告解鎖剩餘：<b>{limit.adSessionsLeft}</b> 次</>}
       </div>
-      <div style={{ fontSize: 11, color: "var(--ink-4)", marginTop: 6 }}>觀看廣告以支持服務運營，完成後自動解鎖 1 次</div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {limit.planTier === "free" && limit.adSessionsLeft > 0 && (
+          <button className="btn primary" onClick={onWatchAd} style={{ fontSize: 13 }}>
+            📺 看廣告獲得 +{ticketCost} 解析券
+          </button>
+        )}
+        {limit.tickets >= ticketCost && limit.adSessionsLeft === 0 && (
+          <button className="btn primary" onClick={onAdComplete} style={{ fontSize: 13 }}>
+            使用 {ticketCost} 張解析券
+          </button>
+        )}
+        <a className="btn" href="/pricing" style={{ fontSize: 13 }}>🚀 升級方案</a>
+      </div>
     </div>
   );
 }
 
-function LimitActions({ planTier, onWatchAd }: { planTier: string; onWatchAd: () => void }) {
-  const isFree = planTier === "free";
-  return (
-    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-      {isFree && (
-        <button className="btn primary" onClick={onWatchAd} style={{ fontSize: 13 }}>
-          📺 看廣告解鎖 1 次（免費）
-        </button>
-      )}
-      <a className="btn" href="/pricing" style={{ fontSize: 13 }}>
-        🚀 升級方案
-      </a>
-    </div>
-  );
-}
-
-// Inline generate block for the overview tab
-function InsightGate({ loading, limit, watching, countdown, onGenerate, onWatchAd }: GateProps) {
-  if (watching) return (
-    <div style={{ marginBottom: 16 }}>
-      <AdCountdownBar countdown={countdown} />
-    </div>
-  );
-
+function InsightGate({ loading, limit, watching, onGenerate, onWatchAd, onAdComplete, onAdCancel }: GateProps) {
   if (limit) return (
-    <div style={{ marginBottom: 16, padding: "14px 16px", background: "oklch(98% .02 30)", border: "1px solid oklch(88% .06 30)", borderRadius: 8 }}>
-      <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6, color: "oklch(40% .12 30)" }}>本月 AI 分析次數已用完</div>
-      <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 10 }}>看廣告可獲得 1 次免費使用，可重複觀看</div>
-      <LimitActions planTier={limit.planTier} onWatchAd={onWatchAd} />
+    <div style={{ marginBottom: 16 }}>
+      <LimitBanner limit={limit} watching={watching} ticketCost={1}
+        onWatchAd={onWatchAd} onAdComplete={onAdComplete} onAdCancel={onAdCancel} />
     </div>
   );
-
   return (
     <div style={{ marginBottom: 16, padding: "14px 16px", background: "var(--bg-soft)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
       <div>
@@ -413,23 +372,13 @@ function InsightGate({ loading, limit, watching, countdown, onGenerate, onWatchA
   );
 }
 
-// Centered generate prompt for other tabs (SWOT / Risks / QA)
-function GeneratePrompt({ loading, limit, watching, countdown, onGenerate, onWatchAd }: GateProps) {
-  if (watching) return (
-    <div style={{ padding: "16px 0" }}>
-      <AdCountdownBar countdown={countdown} />
-    </div>
-  );
-
+function GeneratePrompt({ loading, limit, watching, onGenerate, onWatchAd, onAdComplete, onAdCancel }: GateProps) {
   if (limit) return (
-    <div style={{ textAlign: "center", padding: "32px 16px" }}>
-      <div style={{ fontSize: 32, marginBottom: 10 }}>⏳</div>
-      <div style={{ fontWeight: 600, marginBottom: 4, color: "var(--ink)" }}>本月次數已用完</div>
-      <div style={{ fontSize: 13, color: "var(--ink-3)", marginBottom: 16 }}>看廣告可獲得 1 次免費使用，可重複觀看</div>
-      <LimitActions planTier={limit.planTier} onWatchAd={onWatchAd} />
+    <div style={{ padding: "16px 0" }}>
+      <LimitBanner limit={limit} watching={watching} ticketCost={1}
+        onWatchAd={onWatchAd} onAdComplete={onAdComplete} onAdCancel={onAdCancel} />
     </div>
   );
-
   return (
     <div style={{ textAlign: "center", padding: "32px 16px", color: "var(--ink-3)" }}>
       <div style={{ fontSize: 32, marginBottom: 12 }}>🤖</div>
@@ -442,22 +391,13 @@ function GeneratePrompt({ loading, limit, watching, countdown, onGenerate, onWat
   );
 }
 
-// CV tab gate
-function CVGate({ loading, limit, watching, countdown, onGenerate, onWatchAd }: GateProps) {
-  if (watching) return (
-    <div style={{ marginBottom: 16 }}>
-      <AdCountdownBar countdown={countdown} />
-    </div>
-  );
-
+function CVGate({ loading, limit, watching, onGenerate, onWatchAd, onAdComplete, onAdCancel }: GateProps) {
   if (limit) return (
-    <div style={{ marginBottom: 16, padding: "14px 16px", background: "oklch(98% .02 30)", border: "1px solid oklch(88% .06 30)", borderRadius: 8 }}>
-      <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 6, color: "oklch(40% .12 30)" }}>本月 CV 客製次數已用完</div>
-      <div style={{ fontSize: 12, color: "var(--ink-3)", marginBottom: 10 }}>看廣告可獲得 1 次免費使用，可重複觀看</div>
-      <LimitActions planTier={limit.planTier} onWatchAd={onWatchAd} />
+    <div style={{ marginBottom: 16 }}>
+      <LimitBanner limit={limit} watching={watching} ticketCost={1}
+        onWatchAd={onWatchAd} onAdComplete={onAdComplete} onAdCancel={onAdCancel} />
     </div>
   );
-
   return (
     <div style={{ marginBottom: 16, padding: "14px 16px", background: "var(--bg-soft)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
       <div style={{ fontSize: 13, color: "var(--ink-2)" }}>根據此職缺 JD，AI 將協助客製化你的履歷摘要與重點</div>
