@@ -57,6 +57,9 @@ model User {
   planExpiresAt        DateTime?                        // null = free forever
   stripeCustomerId     String?      @unique
   stripeSubscriptionId String?      @unique
+  stripeScheduleId     String?      @unique             // active subscription schedule (for period-end downgrade)
+  pendingPlanTier      String?                          // null=no change pending; "pro" / "free" if user scheduled a downgrade/cancel
+  pendingPlanAt        DateTime?                        // when pendingPlanTier takes effect (current period end)
   usageMonth           String?                          // "2026-05", resets counters when month changes
   analysisUsed         Int          @default(0)
   insightsUsed         Int          @default(0)
@@ -73,6 +76,7 @@ model User {
   resumeTailors   ResumeTailor[]
   coverLetters    CoverLetter[]
   coverLetterTailors CoverLetterTailor[]
+  cancellationFeedback CancellationFeedback[]
 }
 
 model Resume {
@@ -231,4 +235,20 @@ model IndustryCache {
   industry  String   @id
   data      Json
   updatedAt DateTime @default(now())
+}
+
+// Records why a paid user downgraded or cancelled — used to optimize the product.
+model CancellationFeedback {
+  id            String   @id @default(cuid())
+  userId        String
+  fromTier      String   // "pro" | "max" — what they were on at submission time
+  toTier        String   // "free" (cancel) | "pro" (downgrade from max)
+  reasons       String[] // multi-select keys, e.g. ["price","not_using","missing_features"]
+  freeText      String?  @db.Text
+  effectiveAt   DateTime?  // period-end timestamp when the change takes effect
+  createdAt     DateTime @default(now())
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
 }

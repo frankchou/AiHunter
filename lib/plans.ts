@@ -104,6 +104,28 @@ export function isMaxTier(planTier: string | null | undefined): boolean {
   return planTier === "max";
 }
 
+/** Cancellation / downgrade reasons surfaced in the feedback modal. */
+export const CANCEL_REASON_KEYS = [
+  "price",            // 太貴
+  "not_using",        // 沒時間用 / 不再求職
+  "missing_features", // 功能不夠用
+  "found_job",        // 找到工作了
+  "buggy",            // 系統不好用 / bug 太多
+  "switched_tool",    // 改用其他工具
+  "other",            // 其他
+] as const;
+export type CancelReasonKey = (typeof CANCEL_REASON_KEYS)[number];
+
+export const CANCEL_REASON_LABELS: Record<CancelReasonKey, string> = {
+  price:            "覺得太貴",
+  not_using:        "沒時間用 / 不再求職",
+  missing_features: "功能不夠用",
+  found_job:        "已經找到工作了",
+  buggy:            "系統不好用 / 遇到問題",
+  switched_tool:    "改用其他工具",
+  other:            "其他原因",
+};
+
 /**
  * Basic limit check (used in SettingsView for display only).
  * Full billing logic (with ticket fallback) lives in lib/billing.ts.

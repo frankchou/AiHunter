@@ -1,8 +1,10 @@
 "use client";
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PLANS } from "@/lib/plans";
 import type { PlanTier } from "@/lib/plans";
+import { PlanChangeModal, type PlanChangeKind } from "@/components/subscription/PlanChangeModal";
 
 interface Props {
   currentTier: PlanTier;
@@ -12,6 +14,7 @@ interface Props {
 export function PricingView({ currentTier, usageSummary }: Props) {
   const router = useRouter();
   const [loading, setLoading] = useState<string | null>(null);
+  const [modal, setModal] = useState<PlanChangeKind | null>(null);
 
   const handleUpgrade = async (tier: "pro" | "max") => {
     setLoading(tier);
@@ -23,17 +26,6 @@ export function PricingView({ currentTier, usageSummary }: Props) {
       });
       const { url, error } = await res.json();
       if (error) { alert(error); return; }
-      if (url) window.location.href = url;
-    } finally {
-      setLoading(null);
-    }
-  };
-
-  const handlePortal = async () => {
-    setLoading("portal");
-    try {
-      const res = await fetch("/api/stripe/portal", { method: "POST" });
-      const { url } = await res.json();
       if (url) window.location.href = url;
     } finally {
       setLoading(null);
@@ -104,19 +96,40 @@ export function PricingView({ currentTier, usageSummary }: Props) {
                 {plan.features.map((f, i) => <li key={i}>{f}</li>)}
               </ul>
 
+              {/* CTA based on relative position to current tier */}
               {isCurrent ? (
-                <div style={{ textAlign: "center", padding: "8px 0", fontSize: 13, color: "var(--ink-3)", fontWeight: 600 }}>
-                  ✓ 目前方案
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  <div style={{ textAlign: "center", padding: "6px 0", fontSize: 13, color: "var(--ink-3)", fontWeight: 600 }}>
+                    ✓ 目前方案
+                  </div>
+                  {tier !== "free" && (
+                    <Link href="/settings/billing" className="btn" style={{ width: "100%", fontSize: 12, justifyContent: "center" }}>
+                      管理訂閱 →
+                    </Link>
+                  )}
                 </div>
               ) : tier === "free" ? (
-                <button className="btn" style={{ width: "100%" }} onClick={() => router.back()}>
-                  繼續使用免費版
-                </button>
-              ) : currentTier !== "free" ? (
-                <button className="btn primary" style={{ width: "100%" }} onClick={handlePortal} disabled={loading === "portal"}>
-                  {loading === "portal" ? "跳轉中…" : "管理訂閱"}
+                currentTier === "max" || currentTier === "pro" ? (
+                  // Free card → for paid user, this is "Cancel"
+                  <button
+                    className="btn"
+                    style={{ width: "100%", color: "oklch(45% .15 25)", borderColor: "oklch(75% .12 25)" }}
+                    onClick={() => setModal("cancel")}
+                  >
+                    取消訂閱
+                  </button>
+                ) : (
+                  <button className="btn" style={{ width: "100%" }} onClick={() => router.back()}>
+                    繼續使用免費版
+                  </button>
+                )
+              ) : tier === "pro" && currentTier === "max" ? (
+                // Max user looking at Pro card → Downgrade
+                <button className="btn" style={{ width: "100%" }} onClick={() => setModal("downgrade")}>
+                  降級為 Pro
                 </button>
               ) : (
+                // Free user looking at Pro/Max OR Pro user looking at Max → Upgrade
                 <button
                   className="btn primary"
                   style={{ width: "100%", ...(highlight ? {} : { background: "var(--ink-2)", borderColor: "var(--ink-2)" }) }}
@@ -134,6 +147,16 @@ export function PricingView({ currentTier, usageSummary }: Props) {
       <div style={{ marginTop: 20, fontSize: 12, color: "var(--ink-3)" }}>
         所有方案均支援信用卡付款 · 可隨時取消 · 若有問題請聯繫我們
       </div>
+
+      {modal && currentTier !== "free" && (
+        <PlanChangeModal
+          kind={modal}
+          fromTier={currentTier as "pro" | "max"}
+          effectiveAt={null}
+          onClose={() => setModal(null)}
+          onSuccess={() => { setModal(null); router.push("/settings/billing"); }}
+        />
+      )}
     </div>
   );
 }

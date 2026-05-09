@@ -144,6 +144,16 @@ STRIPE_PRO_PRICE_ID=price_...
 STRIPE_MAX_PRICE_ID=price_...
 ```
 
+### 取消 / 降級流程（期末生效）
+
+| 動作 | 機制 | 時機 |
+|------|------|------|
+| **取消訂閱（Pro/Max → Free）** | `stripe.subscriptions.update({ cancel_at_period_end: true })` + 收集回饋寫入 `CancellationFeedback` | 當期結束時自動取消，UI 仍可用至期限 |
+| **降級（Max → Pro）** | `stripe.subscriptionSchedules.create({ from_subscription })` 建立兩階段排程：phase1 Max 至期末 → phase2 Pro 1 個月 → end_behavior `release` 後續正常 Pro 訂閱 | 當期結束時自動切換 |
+| **還原** | 取消的 `cancel_at_period_end=false`；降級的釋放 `subscriptionSchedules.release` | 立即生效 |
+
+> 每次取消或降級都跳出 modal 收集回饋（多選原因 + 自由文字），存入 `CancellationFeedback` 表用於日後產品優化。
+
 ---
 
 ## 七、履歷與 CV 版本管理（Max 旗艦專屬）

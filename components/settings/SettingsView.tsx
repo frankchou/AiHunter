@@ -30,13 +30,6 @@ export function SettingsView() {
   const insightsLimit = plan.limits.insightsPerMonth;
   const analysisLimit = plan.limits.analysisPerMonth;
 
-  const handlePortal = async () => {
-    const res = await fetch("/api/stripe/portal", { method: "POST" });
-    const { url, error } = await res.json();
-    if (error) { alert("請先完成訂閱後再試"); return; }
-    if (url) window.location.href = url;
-  };
-
   // Notification prefs (local state for now)
   const [minScore, setMinScore] = useState(70);
   const [emailDigest, setEmailDigest] = useState(false);
@@ -130,7 +123,7 @@ export function SettingsView() {
             </div>
             <div style={{ display: "flex", gap: 8 }}>
               {tier !== "free" && (
-                <button className="btn" style={{ fontSize: 12 }} onClick={handlePortal}>
+                <button className="btn" style={{ fontSize: 12 }} onClick={() => router.push("/settings/billing")}>
                   管理訂閱
                 </button>
               )}

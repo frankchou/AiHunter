@@ -27,8 +27,9 @@ AiHunter/
 │   │   ├── resume/            # 履歷頁面（A 根履歷的編輯入口）
 │   │   ├── resumes/           # 履歷版本夾（Max only，唯讀列表 + 預覽 + 下載）
 │   │   ├── industry/          # 產業 Top 20
-│   │   ├── pricing/           # 升級方案頁
+│   │   ├── pricing/           # 升級方案頁（含取消/降級入口）
 │   │   └── settings/          # 設定頁
+│   │       └── billing/       # 管理訂閱（付款方式、帳單紀錄、降級/取消）
 │   ├── api/
 │   │   ├── jobs/[id]/
 │   │   │   ├── insights/        # AI 深度分析（GET/POST）
@@ -45,8 +46,12 @@ AiHunter/
 │   │   │   └── unlock/        # 廣告解鎖（POST）
 │   │   ├── stripe/
 │   │   │   ├── checkout/      # 建立付款 Session（POST）
-│   │   │   ├── portal/        # Stripe 訂閱管理（POST）
-│   │   │   └── webhook/       # Stripe 事件接收（POST）
+│   │   │   ├── portal/        # Stripe Customer Portal（用於更新付款方式）
+│   │   │   ├── subscription/  # 目前方案 + pending change 摘要（GET）
+│   │   │   ├── invoices/      # 用戶歷史發票（GET）
+│   │   │   ├── cancel/        # 期末取消訂閱 + 收集回饋（POST）/ 還原（DELETE）
+│   │   │   ├── downgrade/     # Max→Pro 期末降級（POST）/ 還原（DELETE）
+│   │   │   └── webhook/       # Stripe 事件接收（POST，含 schedule 事件）
 │   │   ├── saved/             # 收藏管理（GET/POST/DELETE）
 │   │   ├── crawl/             # 職缺爬取（POST）
 │   │   └── user/
@@ -65,9 +70,11 @@ AiHunter/
 │   ├── industry/
 │   │   └── IndustryView.tsx   # 產業排行 + 股價
 │   ├── subscription/
-│   │   ├── AdWatcher.tsx      # 廣告觀看元件（3 則序列）
-│   │   ├── PricingView.tsx    # 方案選擇頁
-│   │   └── UpgradePrompt.tsx  # 升級提示（保留備用）
+│   │   ├── AdWatcher.tsx       # 廣告觀看元件（3 則序列）
+│   │   ├── PricingView.tsx     # 方案選擇頁（含取消/降級按鈕）
+│   │   ├── BillingView.tsx     # 管理訂閱頁（付款方式、帳單紀錄、方案變更）
+│   │   ├── PlanChangeModal.tsx # 取消/降級回饋收集 modal
+│   │   └── UpgradePrompt.tsx   # 升級提示（保留備用）
 │   ├── settings/
 │   │   └── SettingsView.tsx   # 設定頁（方案資訊）
 │   └── layout/
@@ -107,6 +114,9 @@ model User {
   planExpiresAt        DateTime? # Stripe 訂閱到期日
   stripeCustomerId     String?   # Stripe Customer ID
   stripeSubscriptionId String?   # Stripe Subscription ID
+  stripeScheduleId     String?   # Active subscription schedule (期末降級用)
+  pendingPlanTier      String?   # "free"=已排取消、"pro"=已排降級、null=無
+  pendingPlanAt        DateTime? # 取消/降級生效時間（period end）
   usageMonth           String?   # "2026-05"，月度計數器基準
   insightsUsed         Int       # 本月 AI 分析使用次數
   cvTailorsUsed        Int       # （遺留欄位，CV Tailor 已升 Max 旗艦無配額）
@@ -186,6 +196,23 @@ model CoverLetterTailor {
   @@index([userId, jobId, isCurrent])
 }
 ```
+
+### CancellationFeedback（取消/降級原因收集）
+
+```prisma
+model CancellationFeedback {
+  id            String   # cuid
+  userId        String
+  fromTier      String   # "pro" | "max"
+  toTier        String   # "free" | "pro"
+  reasons       String[] # multi-select keys, e.g. ["price","not_using"]
+  freeText      String?  # 自由填寫
+  effectiveAt   DateTime?  # 期末生效時間
+  createdAt     DateTime
+}
+```
+
+> 每次成功提交取消/降級時建立一筆。後續可從這張表 dashboard 看「為何離開」的趨勢來指導產品改進。
 
 > B 文件同 (userId, jobId) 重新產生 → 舊 row `isCurrent=false`、建新 row `isCurrent=true`。從 Prepare 頁刪除 → 物理刪除整組 (userId, jobId) 的所有 row。**A 永不可刪**。
 

@@ -45,15 +45,36 @@ export async function POST(req: NextRequest) {
         const sub = event.data.object as Stripe.Subscription;
         const userId = sub.metadata?.userId;
         if (!userId) break;
-        const tier = ((sub.metadata?.tier as "pro" | "max") ?? "pro");
+        // Resolve the *current* tier from the actual price item, not metadata —
+        // metadata may be stale after a scheduled downgrade phase transitions.
+        const proPriceId = process.env.STRIPE_PRO_PRICE_ID;
+        const maxPriceId = process.env.STRIPE_MAX_PRICE_ID;
+        const priceId    = sub.items.data[0]?.price?.id ?? null;
+        const tierFromPrice: "pro" | "max" =
+          priceId === maxPriceId ? "max" :
+          priceId === proPriceId ? "pro" :
+          ((sub.metadata?.tier as "pro" | "max") ?? "pro");
         const active = sub.status === "active" || sub.status === "trialing";
-        // current_period_end moved to item level in Stripe dahlia API
         const periodEnd = sub.items.data[0]?.current_period_end;
+
+        // Clear pending fields once the actual subscription matches them
+        // (Stripe scheduled transition fired, or user pressed "undo")
+        const userBefore = await prisma.user.findUnique({
+          where: { id: userId },
+          select: { pendingPlanTier: true },
+        });
+        const clearPending = userBefore?.pendingPlanTier === tierFromPrice;
+
         await prisma.user.update({
           where: { id: userId },
           data: {
-            planTier: active ? tier : "free",
-            planExpiresAt: active ? null : (periodEnd ? new Date(periodEnd * 1000) : null),
+            planTier:        active ? tierFromPrice : "free",
+            planExpiresAt:   active ? null : (periodEnd ? new Date(periodEnd * 1000) : null),
+            ...(clearPending && {
+              pendingPlanTier:  null,
+              pendingPlanAt:    null,
+              stripeScheduleId: null,
+            }),
           },
         });
         break;
@@ -64,7 +85,26 @@ export async function POST(req: NextRequest) {
         if (!userId) break;
         await prisma.user.update({
           where: { id: userId },
-          data: { planTier: "free", stripeSubscriptionId: null, planExpiresAt: null },
+          data: {
+            planTier:             "free",
+            stripeSubscriptionId: null,
+            stripeScheduleId:     null,
+            pendingPlanTier:      null,
+            pendingPlanAt:        null,
+            planExpiresAt:        null,
+          },
+        });
+        break;
+      }
+      case "subscription_schedule.released":
+      case "subscription_schedule.canceled": {
+        const sched = event.data.object as Stripe.SubscriptionSchedule;
+        const userId = sched.metadata?.userId;
+        if (!userId) break;
+        // Schedule released — clear our pointer so we don't try to release it again.
+        await prisma.user.updateMany({
+          where: { id: userId, stripeScheduleId: sched.id },
+          data:  { stripeScheduleId: null },
         });
         break;
       }
