@@ -3,7 +3,9 @@ import Link from "next/link";
 import { useState, useMemo } from "react";
 import useSWR from "swr";
 import { INDUSTRIES } from "@/lib/mock-data";
+import { fmtCompactMoney, fmtPct } from "@/lib/utils";
 import type { StockQuote } from "@/app/api/stocks/route";
+import type { QuarterlyFinancials } from "@/app/api/financials/route";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
@@ -68,6 +70,11 @@ export function IndustryView() {
     fetcher,
     { revalidateOnFocus: false, refreshInterval: 300_000 }
   );
+  const { data: finData } = useSWR<Record<string, QuarterlyFinancials>>(
+    tickerStr ? `/api/financials?symbols=${tickerStr}` : null,
+    fetcher,
+    { revalidateOnFocus: false }
+  );
 
   return (
     <div className="app-content">
@@ -126,6 +133,7 @@ export function IndustryView() {
                   key={c.name}
                   company={c}
                   quote={c.ticker ? stockData?.[c.ticker] : undefined}
+                  financials={c.ticker ? finData?.[c.ticker] : undefined}
                 />
               ))}
             </tbody>
@@ -136,7 +144,11 @@ export function IndustryView() {
   );
 }
 
-function CompanyRow({ company: c, quote }: { company: AiCompany; quote: StockQuote | undefined }) {
+function CompanyRow({ company: c, quote, financials }: {
+  company: AiCompany;
+  quote: StockQuote | undefined;
+  financials: QuarterlyFinancials | undefined;
+}) {
   const [expanded, setExpanded] = useState(false);
   const [showJobs, setShowJobs]  = useState(false);
   const jobCount = c.jobCount ?? 0;
@@ -230,6 +242,7 @@ function CompanyRow({ company: c, quote }: { company: AiCompany; quote: StockQuo
                 </ul>
               </div>
             </div>
+            <FinancialsBlock company={c} financials={financials} />
             {showJobs && (
               <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
                 <div className="eyebrow" style={{ marginBottom: 8 }}>工作機會 · {jobCount} 筆</div>
@@ -280,5 +293,101 @@ function CompanyRow({ company: c, quote }: { company: AiCompany; quote: StockQuo
         </tr>
       )}
     </>
+  );
+}
+
+function FinancialsBlock({ company, financials }: { company: AiCompany; financials: QuarterlyFinancials | undefined }) {
+  // Private company / no ticker → AI gave us no symbol to query
+  if (!company.ticker) {
+    return (
+      <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+        <div className="eyebrow" style={{ marginBottom: 6 }}>最近財報</div>
+        <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+          未公開財報（私人公司）
+        </div>
+      </div>
+    );
+  }
+  if (!financials) {
+    return (
+      <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+        <div className="eyebrow" style={{ marginBottom: 6 }}>最近財報</div>
+        <div style={{ fontSize: 12, color: "var(--ink-3)" }}>
+          載入中或暫無資料
+        </div>
+      </div>
+    );
+  }
+
+  const niColor = financials.isProfit ? "#16a34a" : "#dc2626";
+  return (
+    <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8 }}>
+        <span className="eyebrow">最近財報</span>
+        <span style={{ fontSize: 11, color: "var(--ink-3)", fontFamily: "var(--font-mono)" }}>
+          {financials.period} · 截止 {financials.endDate}
+        </span>
+        <span className="tag" style={{ fontSize: 10, color: niColor }}>
+          {financials.isProfit ? "獲利" : "虧損"}
+        </span>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+        <FinMetric
+          label="營收"
+          value={financials.revenue}
+          currency={financials.currency}
+          yoy={financials.yoyRevenuePct}
+          qoq={financials.qoqRevenuePct}
+        />
+        <FinMetric
+          label="淨利"
+          value={financials.netIncome}
+          currency={financials.currency}
+          yoy={financials.yoyNetIncomePct}
+          qoq={financials.qoqNetIncomePct}
+          highlightSign
+        />
+      </div>
+      <div style={{ marginTop: 6, fontSize: 10, color: "var(--ink-4)" }}>
+        資料來源：Yahoo Finance · 每日更新
+      </div>
+    </div>
+  );
+}
+
+function FinMetric({
+  label, value, currency, yoy, qoq, highlightSign,
+}: {
+  label: string;
+  value: number | null;
+  currency: string | null;
+  yoy: number | null;
+  qoq: number | null;
+  highlightSign?: boolean;
+}) {
+  const valueColor = highlightSign && value != null
+    ? (value >= 0 ? "#16a34a" : "#dc2626")
+    : "var(--ink-1)";
+  const pctColor = (p: number | null) =>
+    p == null ? "var(--ink-3)" : p > 0 ? "#16a34a" : p < 0 ? "#dc2626" : "var(--ink-3)";
+
+  return (
+    <div style={{ background: "var(--bg)", border: "1px solid var(--line)", borderRadius: 6, padding: "10px 12px" }}>
+      <div style={{ fontSize: 11, color: "var(--ink-3)", marginBottom: 2 }}>{label}</div>
+      <div style={{ fontSize: 18, fontWeight: 700, fontFamily: "var(--font-mono)", color: valueColor }}>
+        {fmtCompactMoney(value, currency)}
+      </div>
+      <div style={{ display: "flex", gap: 12, marginTop: 6, fontSize: 11, fontFamily: "var(--font-mono)" }}>
+        <div>
+          <span style={{ color: "var(--ink-3)" }}>YoY </span>
+          <span style={{ color: pctColor(yoy), fontWeight: 600 }}>{fmtPct(yoy)}</span>
+        </div>
+        <div>
+          <span style={{ color: "var(--ink-3)" }}>QoQ </span>
+          <span style={{ color: pctColor(qoq), fontWeight: 600 }}>{fmtPct(qoq)}</span>
+        </div>
+      </div>
+    </div>
   );
 }

@@ -42,6 +42,8 @@ AiHunter/
 │   │   ├── cover-letter/        # A CV 儲存/讀取（GET/POST，全 plan）
 │   │   │   └── draft/           # AI 起草/建議（POST，消耗 analysis 配額）
 │   │   ├── industries/        # 產業 Top 20（GET，支援 ?refresh=1）
+│   │   ├── financials/        # 公司最近一季財報（GET，Yahoo Finance + 24h cache）
+│   │   ├── stocks/            # 即時股價（GET，5 分鐘快取）
 │   │   ├── ads/
 │   │   │   └── unlock/        # 廣告解鎖（POST）
 │   │   ├── stripe/
@@ -196,6 +198,18 @@ model CoverLetterTailor {
   @@index([userId, jobId, isCurrent])
 }
 ```
+
+### FinancialsCache（公司財報 24h 快取）
+
+```prisma
+model FinancialsCache {
+  ticker    String   # primary key — 如 "AAPL", "2330.TW", "9984.T"
+  data      Json     # QuarterlyFinancials 物件
+  updatedAt DateTime
+}
+```
+
+> 由 `/api/financials` 寫入，IndustryView 展開行時透過 SWR 讀取。
 
 ### CancellationFeedback（取消/降級原因收集）
 
@@ -368,6 +382,19 @@ checkout.session.completed
 - 點擊 badge → 用 `/api/jobs?company=<name>` 同樣 `contains` 比對載入清單
 - N=0 時 badge disabled
 - 若整體 N 偏低，根本原因為 crawler 來源以本地中小型公司為主，跟 AI 推薦的全球巨頭重疊度低（待擴充職源）
+
+### 產業 Top 20 公司財報資訊
+
+每間有 ticker 的上市公司，展開行後顯示一個「最近財報」block：
+- **資料來源**：Yahoo Finance 非官方 `quoteSummary?modules=incomeStatementHistoryQuarterly` endpoint
+- **快取**：`FinancialsCache` 表，TTL **24 小時**（避免每次載入頁都打 Yahoo）
+- **顯示欄位**：
+  - 期別（如 `Q3'25`） + 截止日 + 獲利 / 虧損 tag
+  - 營收 + YoY % + QoQ %
+  - 淨利 + YoY % + QoQ %（淨利字色依正負區分綠/紅）
+- **私人公司（無 ticker）**：顯示「未公開財報（私人公司）」
+- **Yahoo 失敗 / 無資料**：顯示「載入中或暫無資料」
+- **限制**：Yahoo 為非官方 API，若格式變動需更新 fetch 程式
 
 ---
 

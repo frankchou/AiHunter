@@ -144,6 +144,19 @@ STRIPE_PRO_PRICE_ID=price_...
 STRIPE_MAX_PRICE_ID=price_...
 ```
 
+### 公司最近一季財報（產業 Top 20）
+
+展開公司行後顯示：
+- **期別**（Q3'25 等）+ 截止日 + 獲利/虧損 tag
+- **營收**：金額 + YoY % + QoQ %
+- **淨利**：金額（依正負染色）+ YoY % + QoQ %
+- **資料來源**：Yahoo Finance（非官方 endpoint），24h DB 快取
+- **私人公司**（無 ticker）：顯示「未公開財報」
+
+> Yahoo 為非官方 API，若失效需切換供應商（Alpha Vantage / Finnhub）。
+
+---
+
 ### 取消 / 降級流程（期末生效）
 
 | 動作 | 機制 | 時機 |

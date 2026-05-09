@@ -48,3 +48,38 @@ export function buildQueryString(params: Record<string, unknown>): string {
 export function cn(...classes: (string | undefined | false | null)[]): string {
   return classes.filter(Boolean).join(" ");
 }
+
+// Compact money formatter for financial values: $24.3B / NT$ 580M / ¥1.2T.
+// `value` is in the natural unit of the currency (USD dollars, JPY yen, …).
+export function fmtCompactMoney(value: number | null | undefined, currency: string | null | undefined): string {
+  if (value == null || isNaN(value)) return "—";
+  const sign  = value < 0 ? "-" : "";
+  const abs   = Math.abs(value);
+  const sym   =
+    currency === "USD" ? "$" :
+    currency === "TWD" ? "NT$" :
+    currency === "JPY" ? "¥" :
+    currency === "KRW" ? "₩" :
+    currency === "HKD" ? "HK$" :
+    currency === "EUR" ? "€" :
+    currency === "GBP" ? "£" :
+    currency === "CNY" ? "¥" :
+    currency ? `${currency} ` : "";
+
+  let unit = "";
+  let num  = abs;
+  if      (abs >= 1e12) { num = abs / 1e12; unit = "T"; }
+  else if (abs >= 1e9)  { num = abs / 1e9;  unit = "B"; }
+  else if (abs >= 1e6)  { num = abs / 1e6;  unit = "M"; }
+  else if (abs >= 1e3)  { num = abs / 1e3;  unit = "K"; }
+
+  const rounded = num >= 100 ? num.toFixed(0) : num.toFixed(1);
+  return `${sign}${sym}${rounded}${unit}`;
+}
+
+// "+12.3%" / "−4.1%" / "—"
+export function fmtPct(p: number | null | undefined): string {
+  if (p == null || isNaN(p)) return "—";
+  const s = p > 0 ? "+" : p < 0 ? "−" : "";
+  return `${s}${Math.abs(p).toFixed(1)}%`;
+}

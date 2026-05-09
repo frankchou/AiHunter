@@ -237,6 +237,14 @@ model IndustryCache {
   updatedAt DateTime @default(now())
 }
 
+// Quarterly financials per ticker, cached 24h to avoid hammering Yahoo's
+// (unofficial) quoteSummary endpoint on every Industry page load.
+model FinancialsCache {
+  ticker    String   @id
+  data      Json
+  updatedAt DateTime @default(now())
+}
+
 // Records why a paid user downgraded or cancelled — used to optimize the product.
 model CancellationFeedback {
   id            String   @id @default(cuid())
