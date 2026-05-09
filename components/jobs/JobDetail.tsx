@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import useSWR from "swr";
 import { fmtSalary, sourceHost, relativeTime } from "@/lib/utils";
 import { AdWatcher } from "@/components/subscription/AdWatcher";
@@ -17,13 +17,21 @@ interface CoverLetterTailorRow {
   content?: string;
 }
 
+type DetailTab = "overview" | "swot" | "risks" | "qa" | "tailor";
+const VALID_TABS: DetailTab[] = ["overview", "swot", "risks", "qa", "tailor"];
+
 export function JobDetail({ job }: { job: Job }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const initialTab = (() => {
+    const t = searchParams.get("tab");
+    return t && (VALID_TABS as string[]).includes(t) ? (t as DetailTab) : "overview";
+  })();
   const [saved, setSaved] = useState(false);
   const [generatingInsight, setGeneratingInsight] = useState(false);
   const [generatingResumeT, setGeneratingResumeT] = useState(false);
   const [generatingCvT,     setGeneratingCvT]     = useState(false);
-  const [tab, setTab] = useState<"overview" | "swot" | "risks" | "qa" | "tailor">("overview");
+  const [tab, setTab] = useState<DetailTab>(initialTab);
 
   const [insightLimit, setInsightLimit] = useState<LimitInfo | null>(null);
   const [adWatching, setAdWatching]     = useState<"insight" | null>(null);

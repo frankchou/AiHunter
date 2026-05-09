@@ -5,6 +5,7 @@ import { fmtSalary } from "@/lib/utils";
 import type { SavedJob } from "@/lib/types";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
+const profileFetcher = (url: string) => fetch(url).then((r) => (r.ok ? r.json() : null));
 
 const STAGES = [
   { id: "saved",      label: "Saved" },
@@ -31,6 +32,10 @@ function ScoreBadge({ score }: { score: number | null | undefined }) {
 
 export function SavedBoard() {
   const { data = [], isLoading, mutate } = useSWR<SavedJob[]>("/api/saved", fetcher);
+  const { data: profile } = useSWR<{ planTier?: string; isSuperUser?: boolean }>(
+    "/api/user/profile", profileFetcher, { revalidateOnFocus: false }
+  );
+  const isMax = !!profile && (profile.isSuperUser || profile.planTier === "max");
 
   const moveStage = async (savedId: string, stage: string) => {
     await fetch(`/api/saved/${savedId}`, {
@@ -122,6 +127,16 @@ export function SavedBoard() {
                       >
                         原文 ↗
                       </a>
+                      {s.id === "preparing" && isMax && (
+                        <Link
+                          href={`/job/${item.job.id}?tab=tailor`}
+                          className="btn"
+                          style={{ fontSize: 11, padding: "3px 8px", whiteSpace: "nowrap" }}
+                          title="AI 撰寫針對性履歷 + CV"
+                        >
+                          ✨ 履歷 + CV
+                        </Link>
+                      )}
                       {s.id === "preparing" && (
                         <button
                           className="btn"
