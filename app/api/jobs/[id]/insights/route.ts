@@ -52,25 +52,20 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
 
     // Persist if DB is available
+    const insightFields = {
+      companyTrend: insight.companyTrend ?? null,
+      industryTrend: insight.industryTrend ?? null,
+      swot: insight.swot,
+      risks: insight.risks,
+      strategy: insight.strategy,
+      questions: insight.questions,
+      refs: insight.refs,
+    };
     try {
       const saved = await prisma.insight.upsert({
         where: { userId_jobId: { userId: session.user.id, jobId: params.id } },
-        create: {
-          userId: session.user.id,
-          jobId: params.id,
-          swot: insight.swot,
-          risks: insight.risks,
-          strategy: insight.strategy,
-          questions: insight.questions,
-          refs: insight.refs,
-        },
-        update: {
-          swot: insight.swot,
-          risks: insight.risks,
-          strategy: insight.strategy,
-          questions: insight.questions,
-          refs: insight.refs,
-        },
+        create: { userId: session.user.id, jobId: params.id, ...insightFields },
+        update: insightFields,
       });
       return NextResponse.json(saved);
     } catch {

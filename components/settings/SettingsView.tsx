@@ -4,14 +4,21 @@ import { signOut, useSession } from "next-auth/react";
 
 export function SettingsView() {
   const { data: session } = useSession();
-  const [apiKey, setApiKey] = useState("");
-  const [adzunaId, setAdzunaId] = useState("");
-  const [adzunaKey, setAdzunaKey] = useState("");
+
+  // Notification prefs (local state for now)
+  const [minScore, setMinScore] = useState(70);
+  const [emailDigest, setEmailDigest] = useState(false);
+  const [pushNew, setPushNew] = useState(true);
+
+  // Display prefs
+  const [language, setLanguage] = useState("zh-TW");
+
+  // Privacy
+  const [shareAnalytics, setShareAnalytics] = useState(true);
+
   const [saved, setSaved] = useState(false);
 
-  const handleSave = async () => {
-    // Keys stored client-side only (env vars used server-side)
-    // In production this would call a settings API
+  const handleSave = () => {
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
   };
@@ -20,7 +27,7 @@ export function SettingsView() {
     <div className="app-content">
       <div className="section-h">
         <h3>設定</h3>
-        <span className="sub">帳號與 API 設定</span>
+        <span className="sub">帳號與個人偏好</span>
       </div>
 
       <div style={{ display: "grid", gap: 16, maxWidth: 600 }}>
@@ -28,117 +35,137 @@ export function SettingsView() {
         <div className="card" style={{ padding: 18 }}>
           <div className="eyebrow" style={{ marginBottom: 12 }}>帳號資訊</div>
           {session?.user && (
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-              {session.user.image && (
-                // eslint-disable-next-line @next-eslint/next/no-img-element
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
+              {session.user.image ? (
+                // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={session.user.image}
                   alt={session.user.name ?? ""}
-                  style={{ width: 44, height: 44, borderRadius: "50%", border: "2px solid var(--line)" }}
+                  style={{ width: 52, height: 52, borderRadius: "50%", border: "2px solid var(--line)" }}
                 />
+              ) : (
+                <div style={{ width: 52, height: 52, borderRadius: "50%", background: "var(--primary)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 22, color: "#fff", fontWeight: 700 }}>
+                  {(session.user.name?.[0] ?? "U").toUpperCase()}
+                </div>
               )}
               <div>
                 <div style={{ fontWeight: 600, fontSize: 15 }}>{session.user.name}</div>
-                <div style={{ fontSize: 12, color: "var(--ink-3)" }}>{session.user.email}</div>
+                <div style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}>{session.user.email}</div>
+                <div style={{ fontSize: 11, color: "var(--ink-4)", marginTop: 2 }}>
+                  方案：Free
+                </div>
               </div>
             </div>
           )}
           <button
             className="btn"
-            style={{ color: "var(--red, #e53e3e)" }}
+            style={{ color: "#e53e3e" }}
             onClick={() => signOut({ callbackUrl: "/login" })}
           >
             登出
           </button>
         </div>
 
-        {/* API Keys */}
+        {/* Notifications */}
         <div className="card" style={{ padding: 18 }}>
-          <div className="eyebrow" style={{ marginBottom: 4 }}>API 金鑰</div>
-          <p style={{ fontSize: 12, color: "var(--ink-3)", margin: "0 0 12px" }}>
-            金鑰存於伺服器環境變數。此處僅用於本地開發覆蓋。
-          </p>
+          <div className="eyebrow" style={{ marginBottom: 14 }}>通知設定</div>
 
-          <div style={{ display: "grid", gap: 12 }}>
+          <div style={{ display: "grid", gap: 16 }}>
             <div>
-              <label style={{ fontSize: 12, color: "var(--ink-3)", display: "block", marginBottom: 4, fontFamily: "var(--font-mono)" }}>
-                ANTHROPIC_API_KEY
+              <label style={{ fontSize: 13, fontWeight: 500, display: "block", marginBottom: 8 }}>
+                最低推薦分數門檻：<span style={{ color: "var(--primary)", fontWeight: 700 }}>{minScore} 分</span>
               </label>
               <input
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-ant-…"
-                style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--bg)", fontFamily: "var(--font-mono)", fontSize: 13 }}
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={minScore}
+                onChange={(e) => setMinScore(Number(e.target.value))}
+                style={{ width: "100%", accentColor: "var(--primary)" }}
               />
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "var(--ink-3)", marginTop: 2 }}>
+                <span>0 分（全部）</span>
+                <span>100 分（僅頂尖）</span>
+              </div>
             </div>
-            <div>
-              <label style={{ fontSize: 12, color: "var(--ink-3)", display: "block", marginBottom: 4, fontFamily: "var(--font-mono)" }}>
-                ADZUNA_APP_ID
-              </label>
-              <input
-                type="text"
-                value={adzunaId}
-                onChange={(e) => setAdzunaId(e.target.value)}
-                placeholder="xxxxxxxx"
-                style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--bg)", fontFamily: "var(--font-mono)", fontSize: 13 }}
-              />
-            </div>
-            <div>
-              <label style={{ fontSize: 12, color: "var(--ink-3)", display: "block", marginBottom: 4, fontFamily: "var(--font-mono)" }}>
-                ADZUNA_APP_KEY
-              </label>
-              <input
-                type="password"
-                value={adzunaKey}
-                onChange={(e) => setAdzunaKey(e.target.value)}
-                placeholder="xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                style={{ width: "100%", padding: "8px 10px", borderRadius: 6, border: "1px solid var(--line)", background: "var(--bg)", fontFamily: "var(--font-mono)", fontSize: 13 }}
-              />
-            </div>
+
+            <Toggle
+              label="推播新職缺提醒"
+              sub="有符合條件的新職缺時通知我"
+              checked={pushNew}
+              onChange={setPushNew}
+            />
+            <Toggle
+              label="每日 Email 摘要"
+              sub="每天寄送今日最佳職缺"
+              checked={emailDigest}
+              onChange={setEmailDigest}
+            />
           </div>
-
-          <button
-            className="btn primary"
-            style={{ marginTop: 14 }}
-            onClick={handleSave}
-          >
-            {saved ? "已儲存 ✓" : "儲存"}
-          </button>
         </div>
 
-        {/* About */}
+        {/* Display */}
         <div className="card" style={{ padding: 18 }}>
-          <div className="eyebrow" style={{ marginBottom: 8 }}>關於 AI Hunter</div>
-          <div style={{ fontSize: 13, color: "var(--ink-2)", lineHeight: 1.7 }}>
-            <div style={{ marginBottom: 6 }}>AI 驅動的求職助手，幫你找到最合適的職缺。</div>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: 12, color: "var(--ink-3)" }}>
-              <div>Model: claude-sonnet-4-6</div>
-              <div>Sources: 104.com.tw · Remotive · Adzuna</div>
-            </div>
-          </div>
-          <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <a
-              href="https://github.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn"
-              style={{ fontSize: 12 }}
-            >
-              GitHub ↗
-            </a>
-            <a
-              href="https://www.anthropic.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="btn"
-              style={{ fontSize: 12 }}
-            >
-              Anthropic ↗
-            </a>
+          <div className="eyebrow" style={{ marginBottom: 14 }}>顯示語言</div>
+          <div style={{ display: "flex", gap: 8 }}>
+            {[["zh-TW", "繁體中文"], ["en", "English"]].map(([val, label]) => (
+              <button
+                key={val}
+                onClick={() => setLanguage(val)}
+                className={`btn${language === val ? " primary" : ""}`}
+                style={{ fontSize: 13 }}
+              >
+                {label}
+              </button>
+            ))}
           </div>
         </div>
+
+        {/* Privacy */}
+        <div className="card" style={{ padding: 18 }}>
+          <div className="eyebrow" style={{ marginBottom: 14 }}>隱私設定</div>
+          <Toggle
+            label="分享使用分析資料"
+            sub="協助我們改善推薦品質（不包含個人資料）"
+            checked={shareAnalytics}
+            onChange={setShareAnalytics}
+          />
+        </div>
+
+        <button className="btn primary" onClick={handleSave} style={{ alignSelf: "flex-start" }}>
+          {saved ? "已儲存 ✓" : "儲存設定"}
+        </button>
       </div>
+    </div>
+  );
+}
+
+function Toggle({ label, sub, checked, onChange }: {
+  label: string; sub?: string; checked: boolean; onChange: (v: boolean) => void;
+}) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 500 }}>{label}</div>
+        {sub && <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 2 }}>{sub}</div>}
+      </div>
+      <button
+        role="switch"
+        aria-checked={checked}
+        onClick={() => onChange(!checked)}
+        style={{
+          width: 44, height: 24, borderRadius: 12, border: "none", cursor: "pointer",
+          background: checked ? "var(--primary)" : "var(--line)",
+          position: "relative", flexShrink: 0, transition: "background .2s",
+        }}
+      >
+        <span style={{
+          position: "absolute", top: 3, left: checked ? 22 : 3,
+          width: 18, height: 18, borderRadius: "50%", background: "#fff",
+          transition: "left .2s", display: "block",
+        }} />
+      </button>
     </div>
   );
 }

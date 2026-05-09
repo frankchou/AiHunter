@@ -53,7 +53,7 @@ export function JobCard({ job, saved, onSave }: Props) {
         <button className={`btn star${saved ? " on" : ""}`} onClick={onSave}>
           {saved ? "★ 已收藏" : "☆ 收藏"}
         </button>
-        <Link href={`/job/${job.id}`} className="btn">檢視</Link>
+        <Link href={`/job/${encodeURIComponent(job.id)}`} className="btn">檢視</Link>
         <a className="btn primary" href={job.sourceUrl} target="_blank" rel="noopener noreferrer">
           原始職缺 ↗
         </a>
