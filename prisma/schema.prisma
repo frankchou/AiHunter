@@ -52,6 +52,7 @@ model User {
   emailVerified        DateTime?
   image                String?
   onboardingStep       Int          @default(0)
+  isSuperUser          Boolean      @default(false)     // bypasses all plan limits
   planTier             String       @default("free")   // free | pro | max
   planExpiresAt        DateTime?                        // null = free forever
   stripeCustomerId     String?      @unique

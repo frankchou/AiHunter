@@ -1,8 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { getPlan, currentMonth, TICKET_COSTS, type BillAction } from "@/lib/plans";
 
-const OWNER_EMAIL = process.env.OWNER_EMAIL ?? "frank200231@gmail.com";
-
 // Maps action → DB field that tracks its monthly usage
 const ACTION_FIELD: Partial<Record<BillAction, "insightsUsed" | "cvTailorsUsed" | "analysisUsed">> = {
   insight:  "insightsUsed",
@@ -28,12 +26,13 @@ export type BillResult = OkResult | DenyResult;
 /**
  * Atomically checks the plan limit and deducts usage or tickets.
  * Returns ok:true if the action is allowed (and already recorded in DB).
+ * isSuperUser=true in the DB bypasses all limits with no usage tracking.
  */
 export async function consumeUsage(userId: string, action: BillAction): Promise<BillResult> {
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: {
-      email:         true,
+      isSuperUser:   true,
       planTier:      true,
       usageMonth:    true,
       insightsUsed:  true,
@@ -45,8 +44,8 @@ export async function consumeUsage(userId: string, action: BillAction): Promise<
   });
   if (!user) return { ok: false, planTier: "free", tickets: 0, adSessionsLeft: 0 };
 
-  // Owner account bypasses all limits
-  if (user.email === OWNER_EMAIL) return { ok: true, fromTicket: false };
+  // Super user bypasses all limits — no usage recorded
+  if (user.isSuperUser) return { ok: true, fromTicket: false };
 
   const month       = currentMonth();
   const resetNeeded = user.usageMonth !== month;
