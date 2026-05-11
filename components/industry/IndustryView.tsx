@@ -1,5 +1,5 @@
 "use client";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import useSWR from "swr";
 import { INDUSTRIES } from "@/lib/mock-data";
 import { fmtCompactMoney, fmtPct } from "@/lib/utils";
@@ -50,6 +50,20 @@ export function IndustryView() {
     { revalidateOnFocus: false }
   );
 
+  // Profile drives auto-fetch decision: Pro/Max/SuperUser silently auto-generate
+  // on cache miss (refresh is free for them); Free users see CTA so we never
+  // bypass the billing gate.
+  const { data: profile } = useSWR<{ planTier?: string; isSuperUser?: boolean }>(
+    "/api/user/profile",
+    fetcher,
+    { revalidateOnFocus: false }
+  );
+  const canAutoFetch = !!profile && (
+    profile.planTier === "pro" ||
+    profile.planTier === "max" ||
+    profile.isSuperUser === true
+  );
+
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<{ tickets: number; planTier: string } | null>(null);
 
@@ -74,6 +88,23 @@ export function IndustryView() {
     }
   };
 
+  // Auto-fetch on cache miss for eligible plans. One attempt per industry per
+  // session — if generation fails, fall through to the CTA card so user can
+  // retry manually instead of looping.
+  const autoTriedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (isLoading) return;
+    if (!data?.empty) return;
+    if (!canAutoFetch) return;
+    if (refreshing) return;
+    if (autoTriedRef.current.has(selectedIndustry)) return;
+    autoTriedRef.current.add(selectedIndustry);
+    triggerRefresh();
+    // triggerRefresh is intentionally not a dep — it closes over selectedIndustry
+    // which is in deps, so each call uses the current industry.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLoading, data?.empty, canAutoFetch, selectedIndustry, refreshing]);
+
   const companies = data?.companies ?? [];
 
   // Collect all non-null tickers and fetch prices
@@ -97,17 +128,21 @@ export function IndustryView() {
       <div className="section-h">
         <h3>產業 Top 20</h3>
         <span className="sub">AI 彙整各產業頂尖雇主 · 每 7 天更新</span>
-        <button
-          className="btn"
-          style={{ marginLeft: "auto", fontSize: 12 }}
-          disabled={refreshing}
-          onClick={triggerRefresh}
-          title="消耗 3 張解析券（Pro/Max 免費）— AI 重新分析該產業 + 抓取最新職缺"
-        >
-          {refreshing || isLoading
-            ? <><span className="spinner" style={{ width: 10, height: 10 }} /> 抓取中…</>
-            : "🔄 重新獲取"}
-        </button>
+        {/* "重新獲取" is for proactively re-pulling existing data.
+            Hide when there's no data yet — empty-state card handles that flow. */}
+        {!data?.empty && (
+          <button
+            className="btn"
+            style={{ marginLeft: "auto", fontSize: 12 }}
+            disabled={refreshing}
+            onClick={triggerRefresh}
+            title="消耗 3 張解析券（Pro/Max 免費）— AI 重新分析該產業 + 抓取最新職缺"
+          >
+            {refreshing || isLoading
+              ? <><span className="spinner" style={{ width: 10, height: 10 }} /> 抓取中…</>
+              : "🔄 重新獲取"}
+          </button>
+        )}
       </div>
 
       <div className="chips" style={{ marginBottom: 16 }}>
@@ -147,17 +182,34 @@ export function IndustryView() {
         </div>
       )}
 
-      {!isLoading && data?.empty && (
+      {/* Empty + eligible plan → auto-fetch is running (or about to). Show
+          a single unified spinner so the user never sees the "no data, click
+          button" intermediate state. */}
+      {!isLoading && data?.empty && canAutoFetch && (
+        <div className="card" style={{ textAlign: "center", padding: 40 }}>
+          <div className="spinner" style={{ margin: "0 auto 16px" }} />
+          <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>AI 分析中…</div>
+          <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.6 }}>
+            正在收集 Top 20 公司 + 抓取最新職缺，約需 30 秒
+          </div>
+        </div>
+      )}
+
+      {/* Empty + Free user → CTA (do NOT auto-spend tickets). */}
+      {!isLoading && data?.empty && !canAutoFetch && profile && (
         <div className="card" style={{ textAlign: "center", padding: 40 }}>
           <div style={{ fontSize: 28, marginBottom: 12 }}>📊</div>
           <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>尚未有此產業的資料</div>
           <div style={{ fontSize: 13, color: "var(--ink-3)", marginBottom: 16, lineHeight: 1.6 }}>
-            點「重新獲取」由 AI 分析 Top 20 公司 + 抓取最新職缺。<br />
-            消耗 3 張解析券（Pro/Max 免費）。
+            由 AI 分析 Top 20 公司 + 抓取最新職缺，消耗 <b>3 張解析券</b>。<br />
+            升級 Pro / Max 享無限次自動更新。
           </div>
-          <button className="btn primary" onClick={triggerRefresh} disabled={refreshing} style={{ fontSize: 13 }}>
-            {refreshing ? "抓取中…" : "🔄 重新獲取"}
-          </button>
+          <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+            <button className="btn primary" onClick={triggerRefresh} disabled={refreshing} style={{ fontSize: 13 }}>
+              {refreshing ? "抓取中…" : "🔄 獲取資料（3 張券）"}
+            </button>
+            <a href="/pricing" className="btn" style={{ fontSize: 13 }}>升級方案</a>
+          </div>
         </div>
       )}
 

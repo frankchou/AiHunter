@@ -146,6 +146,27 @@ STRIPE_PRO_PRICE_ID=price_...
 STRIPE_MAX_PRICE_ID=price_...
 ```
 
+### 產業 Top 20 進入頁 UX（cache-aware auto-fetch）
+
+進入 `/industry` 或切換產業 chip 時，前端先讀 `GET /api/industries`（不收費）。依結果分流：
+
+| 場景 | 行為 |
+|------|------|
+| Cache 有資料（fresh 或 stale）| 直接顯示。stale 時加一條 banner 提示「資料超過 7 天，建議重新獲取」 |
+| Cache 沒資料、`profile` 為 **Pro / Max / SuperUser** | 前端**自動**發 `?refresh=1`（gate 對這幾個 plan 不扣券）→ 顯示「AI 分析中…」spinner card |
+| Cache 沒資料、`profile` 為 **Free** | 顯示 CTA card：「需 3 張解析券」或升級連結（**不偷扣**）|
+
+**「🔄 重新獲取」按鈕**：只在「已有資料」時顯示。語意 = 在有資料的情況下主動更新（同樣走 `consumeUsage("industryRefresh")` gate）。
+
+**Auto-fetch 防呆**：`autoTriedRef` per-session per-industry 只試一次。若 generate 失敗（網路或 AI error）不會無限重試，落回 CTA card，使用者可手動再試。
+
+**為何安全（不違反「cache 空時禁止 auto-generate」鐵律）**：
+- API 端的 GET 仍不會 auto-generate；auto-fetch 是前端**顯式呼叫 `?refresh=1`**，必然經過 `consumeUsage` gate。
+- Free 永遠看到 CTA、不會被前端偷觸發。
+- Pro/Max/SuperUser 對該 gate 本來就免費，所以「自動」與「按鈕」零差別。
+
+---
+
 ### Top 20 各公司職缺清單（**新機制**）
 
 **入口**：產業頁每間公司有「工作機會 (N)」徽章，N 是該公司在 Adzuna 的職缺總數。點擊 → 開啟 **Fancybox 風格 modal**。
@@ -190,7 +211,7 @@ STRIPE_MAX_PRICE_ID=price_...
 | Endpoint | 何時收費 | 行動 / Plan 限制 |
 |----------|---------|----------------|
 | POST `/api/industries?refresh=1` | 顯式 `refresh=1` | `industryRefresh`（3 張券；Pro/Max 免費） |
-| GET `/api/industries`（無 refresh） | 永遠不收費 | 只讀 IndustryCache；無 cache → 回 empty + needsRefresh，**不會 generate** |
+| GET `/api/industries`（無 refresh） | 永遠不收費 | 只讀 IndustryCache；無 cache → 回 `empty: true`，**不會 generate**。前端對 Pro/Max/SuperUser 會自動補打 `?refresh=1`（仍經 gate）|
 | POST `/api/jobs/[id]/insights` | 每次呼叫 | `insight`（Free 3、Pro 30、Max ∞）；GET 永遠免費讀 |
 | POST `/api/resume/parse` | 每次成功上傳 | `analysis`；先驗證 rawText 有內容才扣 |
 | POST `/api/resume/analyze` | 內容 hash 不同才收費 | `analysis`；同 hash → 直接回 cache，不收 |
