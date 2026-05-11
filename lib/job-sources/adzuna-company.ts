@@ -71,36 +71,84 @@ function getKey() {
   return { appId, appKey };
 }
 
-// Lightweight count probe across the given countries — 1 query each,
-// keeps `results_per_page=1` so we just read `count`.
+// Adzuna's `company=` parameter 400s for some company names (e.g. OpenAI,
+// Anthropic) — likely because they're not in Adzuna's normalised company
+// index. We fall back to `what_phrase=` which searches the full job text.
+// The fallback's count is an UPPER BOUND (it counts jobs that mention the
+// company name anywhere, not strictly "jobs at"). Acceptable for the
+// badge — the modal post-filters by company-name match for the real list.
+async function adzunaProbeOne(country: string, companyName: string, k: { appId: string; appKey: string }): Promise<number> {
+  const base = `https://api.adzuna.com/v1/api/jobs/${country}/search/1`;
+  const common = { app_id: k.appId, app_key: k.appKey, results_per_page: 1 };
+
+  // 1) Try strict company filter first
+  try {
+    const { data } = await axios.get<AdzunaSearchResponse>(base, {
+      params: { ...common, company: companyName },
+      timeout: 10_000,
+    });
+    return data.count ?? 0;
+  } catch (err) {
+    const status = (err as { response?: { status?: number } })?.response?.status;
+    if (status !== 400 && status !== 404) return 0; // unrecoverable
+  }
+
+  // 2) Fallback: phrase search across all fields
+  try {
+    const { data } = await axios.get<AdzunaSearchResponse>(base, {
+      params: { ...common, what_phrase: companyName },
+      timeout: 10_000,
+    });
+    return data.count ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+// Lightweight count probe across the given countries — 1 query each.
 export async function probeCompanyJobCount(companyName: string, countries: string[]): Promise<number> {
   const k = getKey();
   if (!k || !companyName.trim()) return 0;
-
-  const counts = await Promise.all(countries.map(async (country) => {
-    try {
-      const { data } = await axios.get<AdzunaSearchResponse>(
-        `https://api.adzuna.com/v1/api/jobs/${country}/search/1`,
-        {
-          params: {
-            app_id: k.appId, app_key: k.appKey,
-            results_per_page: 1,
-            company: companyName,
-          },
-          timeout: 10_000,
-        },
-      );
-      return data.count ?? 0;
-    } catch {
-      return 0;
-    }
-  }));
+  const counts = await Promise.all(countries.map((c) => adzunaProbeOne(c, companyName, k)));
   return counts.reduce((a, b) => a + b, 0);
 }
 
 // Fetch one page of jobs for a company. Spread across `countries` —
-// each country contributes up to `perCountry` jobs. We then dedupe by
-// company name match and return the first `pageSize` newest.
+// each country contributes up to `perCountry` jobs. Falls back to
+// `what_phrase=` for company names that 400 with `company=` (OpenAI etc),
+// then post-filters by company.display_name match either way.
+async function adzunaFetchCountry(
+  country: string,
+  companyName: string,
+  page: number,
+  perPage: number,
+  k: { appId: string; appKey: string },
+): Promise<AdzunaApiJob[]> {
+  const url = `https://api.adzuna.com/v1/api/jobs/${country}/search/${page}`;
+  const common = { app_id: k.appId, app_key: k.appKey, results_per_page: perPage };
+
+  try {
+    const { data } = await axios.get<AdzunaSearchResponse>(url, {
+      params: { ...common, company: companyName },
+      timeout: 12_000,
+    });
+    return data.results ?? [];
+  } catch (err) {
+    const status = (err as { response?: { status?: number } })?.response?.status;
+    if (status !== 400 && status !== 404) return [];
+  }
+
+  try {
+    const { data } = await axios.get<AdzunaSearchResponse>(url, {
+      params: { ...common, what_phrase: companyName },
+      timeout: 12_000,
+    });
+    return data.results ?? [];
+  } catch {
+    return [];
+  }
+}
+
 export async function fetchCompanyJobsPage(
   companyName: string,
   countries: string[],
@@ -113,24 +161,14 @@ export async function fetchCompanyJobsPage(
   const collected: AdzunaJobRow[] = [];
 
   await Promise.all(countries.map(async (country) => {
-    try {
-      const { data } = await axios.get<AdzunaSearchResponse>(
-        `https://api.adzuna.com/v1/api/jobs/${country}/search/${opts.page}`,
-        {
-          params: {
-            app_id: k.appId, app_key: k.appKey,
-            results_per_page: perCountry,
-            company: companyName,
-          },
-          timeout: 12_000,
-        },
-      );
-
-      for (const j of data.results ?? []) {
-        if (!j.company?.display_name?.toLowerCase().includes(companyName.toLowerCase())) continue;
-        const area = j.location?.area ?? [];
-        const city = area[area.length - 1] ?? j.location?.display_name ?? country.toUpperCase();
-        collected.push({
+    const results = await adzunaFetchCountry(country, companyName, opts.page, perCountry, k);
+    for (const j of results) {
+      // Always post-filter by company name (covers both `company=` and
+      // `what_phrase=` fallback paths — the latter returns lots of noise)
+      if (!j.company?.display_name?.toLowerCase().includes(companyName.toLowerCase())) continue;
+      const area = j.location?.area ?? [];
+      const city = area[area.length - 1] ?? j.location?.display_name ?? country.toUpperCase();
+      collected.push({
           externalId:  `adzuna_${j.id}`,
           title:       j.title,
           company:     j.company.display_name,
@@ -150,10 +188,7 @@ export async function fetchCompanyJobsPage(
           sourceUrl:   j.redirect_url,
           sourceHash:  hashUrl(j.redirect_url),
           postedAt:    j.created ? new Date(j.created) : null,
-        });
-      }
-    } catch {
-      // probe failed — skip this country silently
+      });
     }
   }));
 
