@@ -46,6 +46,10 @@ export function CompanyJobsModal({
     revalidateOnFocus: false,
     revalidateIfStale: false,
     dedupingInterval: 0,
+    // Keep the previous page's data (and its `pagination.total`) visible
+    // while the new page is loading. Without this, the footer flashes
+    // "2 / 1" because the new SWR key has no cached `total` yet.
+    keepPreviousData: true,
   });
 
   // Treat any in-flight fetch as "still loading" so we never reveal a

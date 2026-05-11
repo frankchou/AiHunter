@@ -143,7 +143,10 @@ async function adzunaFetchCountry(
   k: { appId: string; appKey: string },
 ): Promise<AdzunaApiJob[]> {
   const url = `https://api.adzuna.com/v1/api/jobs/${country}/search/${page}`;
-  const common = { app_id: k.appId, app_key: k.appKey, results_per_page: perPage };
+  // sort_by=date gives stable pagination — without it Adzuna returns by
+  // "relevance" which causes the top jobs to bleed across many pages so
+  // page 2/3/… end up mostly duplicates of page 1.
+  const common = { app_id: k.appId, app_key: k.appKey, results_per_page: perPage, sort_by: "date" };
 
   try {
     const { data } = await axios.get<AdzunaSearchResponse>(url, {
@@ -175,7 +178,10 @@ export async function fetchCompanyJobsPage(
   const k = getKey();
   if (!k || !companyName.trim()) return [];
 
-  const perCountry = Math.max(opts.pageSize, 20);
+  // Align Adzuna page N with modal page N: ask for `pageSize` results
+  // per country at Adzuna page N. With sort_by=date this maps cleanly:
+  // modal page 1 = newest 10×country, page 2 = next 10×country.
+  const perCountry = opts.pageSize;
   const collected: AdzunaJobRow[] = [];
 
   await Promise.all(countries.map(async (country) => {
