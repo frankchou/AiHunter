@@ -76,16 +76,37 @@ export function IndustryView() {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<{ tickets: number; planTier: string } | null>(null);
 
-  // Persist chip selection to the user record (cross-device, cross-session).
-  // Fire-and-forget — UI updates locally first; if the patch fails the
-  // sticky preference just doesn't update, which is non-fatal.
+  // Persist chip selection to the user record. Three-layered for resilience:
+  //   1) Optimistic SWR cache update — survives in-tab navigation even if
+  //      the PATCH hasn't returned yet.
+  //   2) keepalive:true on the fetch — lets the request finish after the
+  //      tab navigates away (avoids browser killing the in-flight POST).
+  //   3) Visible error log if the server rejects (e.g. invalid id), so we
+  //      can see this in devtools instead of failing silently.
   const pickIndustry = (id: string) => {
     setSelectedIndustry(id);
+    globalMutate(
+      "/api/user/profile",
+      (current: UserProfile | undefined) =>
+        current ? { ...current, lastViewedIndustry: id } : current,
+      { revalidate: false },
+    );
     fetch("/api/user/profile", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ lastViewedIndustry: id }),
-    }).then(() => globalMutate("/api/user/profile")).catch(() => {});
+      keepalive: true,
+    }).then(async (r) => {
+      if (!r.ok) {
+        const txt = await r.text().catch(() => "");
+        console.error("[IndustryView] PATCH /api/user/profile failed:", r.status, txt);
+        return;
+      }
+      // Reconcile cache with server-side truth.
+      globalMutate("/api/user/profile");
+    }).catch((err) => {
+      console.error("[IndustryView] PATCH /api/user/profile error:", err);
+    });
   };
 
   const triggerRefresh = async () => {
@@ -132,7 +153,7 @@ export function IndustryView() {
     <div className="app-content">
       <div className="section-h">
         <h3>產業 Top 20</h3>
-        <span className="sub">AI 彙整各產業頂尖雇主 · 每 7 天更新</span>
+        <span className="sub">AI 彙整各產業頂尖雇主</span>
         {/* "重新獲取" needs an active selection + existing data. */}
         {selectedIndustry && companies.length > 0 && (
           <button
@@ -199,13 +220,24 @@ export function IndustryView() {
 
       {selectedIndustry && !isLoading && companies.length > 0 && (
         <div className="industry-table">
-          <table>
+          {/* table-layout: fixed + explicit colgroup so column widths stay
+              identical across industries instead of auto-sizing to content. */}
+          <table style={{ tableLayout: "fixed", width: "100%" }}>
+            <colgroup>
+              <col style={{ width: 36 }} />
+              <col style={{ width: 180 }} />
+              <col style={{ width: 64 }} />
+              <col style={{ width: 110 }} />
+              <col style={{ width: "22%" }} />
+              <col style={{ width: "18%" }} />
+              <col style={{ width: "22%" }} />
+            </colgroup>
             <thead>
               <tr>
-                <th style={{ width: 32 }}>#</th>
+                <th>#</th>
                 <th>公司</th>
-                <th style={{ width: 70 }}>地區</th>
-                <th style={{ width: 110 }}>股價</th>
+                <th>地區</th>
+                <th>股價</th>
                 <th>求職優點</th>
                 <th>求職缺點</th>
                 <th>未來趨勢</th>
@@ -300,8 +332,11 @@ function CompanyRow({ company: c, quote, financials, onOpenJobs }: {
             {c.cons.length > 1 && <span style={{ fontSize: 10, color: "var(--ink-3)" }}>+{c.cons.length - 1}</span>}
           </div>
         </td>
-        <td style={{ fontSize: 12, color: "var(--ink-2)", maxWidth: 200 }}>
-          <span style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+        {/* `title` gives a native browser tooltip on hover with the full
+            trend text — no extra dependency. Clicking the row already
+            expands the panel which shows the trend in full too. */}
+        <td style={{ fontSize: 12, color: "var(--ink-2)" }} title={c.trend}>
+          <span style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden", cursor: "help" }}>
             {c.trend}
           </span>
         </td>
@@ -311,6 +346,9 @@ function CompanyRow({ company: c, quote, financials, onOpenJobs }: {
           <td colSpan={7} style={{ background: "var(--bg-soft)", padding: "14px 18px" }}>
             <div style={{ fontSize: 13, color: "var(--ink-2)", marginBottom: 10, lineHeight: 1.6 }}>
               <span className="eyebrow" style={{ marginRight: 8 }}>公司簡介</span>{c.profile}
+            </div>
+            <div style={{ fontSize: 13, color: "var(--ink-2)", marginBottom: 10, lineHeight: 1.6 }}>
+              <span className="eyebrow" style={{ marginRight: 8 }}>未來趨勢</span>{c.trend}
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
               <div>

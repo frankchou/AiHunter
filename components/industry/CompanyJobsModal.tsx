@@ -257,7 +257,8 @@ export function CompanyJobsModal({
               {data.policy.tier === "pro" && data.policy.proUsage && (
                 <>Pro · 本月此公司已用 {data.policy.proUsage.used}/{data.policy.proUsage.quota} 頁</>
               )}
-              {data.policy.tier === "max"  && <>Max 旗艦 · 自動評分、無限解鎖</>}
+              {/* Max / SuperUser: don't echo their plan benefits — they
+                  already know, and the line was reading as upsell-y. */}
             </div>
           </div>
         )}
