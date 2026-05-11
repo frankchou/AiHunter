@@ -31,6 +31,51 @@ async function lookupCompanyRegion(companyName: string): Promise<RegionLookup> {
   return { region: null };
 }
 
+// Load user preferences (shared by GET auto-score and POST unlock).
+async function loadPrefs(userId: string): Promise<JobPreference> {
+  const prefRow = await prisma.preference.findUnique({ where: { userId } });
+  return {
+    locations:  prefRow?.locations  ?? [],
+    salaryMin:  prefRow?.salaryMin  ?? 0,
+    salaryMax:  prefRow?.salaryMax  ?? null,
+    salaryCcy:  prefRow?.salaryCcy  ?? "TWD",
+    industries: prefRow?.industries ?? [],
+    employment: prefRow?.employment ?? [],
+    remote:     prefRow?.remote     ?? [],
+    languages:  prefRow?.languages  ?? [],
+    titles:     prefRow?.titles     ?? "",
+  };
+}
+
+// Score a set of jobs against the user's resume + prefs and persist to
+// JobScore. Used by both POST unlock and GET auto-score (for Max/Pro).
+async function scoreAndPersist(
+  userId: string,
+  jobs: TJob[],
+  parsedResume: ParsedResume,
+  prefs: JobPreference,
+  parsedHash: string,
+): Promise<{ jobId: string; score: number; reasons: string[] }[]> {
+  const scored = await Promise.all(
+    jobs.map(async (j) => {
+      try {
+        const { score, reasons } = await scoreJob(j, parsedResume, prefs);
+        return { jobId: j.id, score, reasons };
+      } catch {
+        return { jobId: j.id, score: 0.5, reasons: ["AI 評分失敗，預設 50 分"] };
+      }
+    }),
+  );
+  await Promise.all(scored.map((s) =>
+    prisma.jobScore.upsert({
+      where:  { userId_jobId: { userId, jobId: s.jobId } },
+      create: { userId, jobId: s.jobId, parsedHash, score: s.score, reasons: s.reasons },
+      update: { parsedHash, score: s.score, reasons: s.reasons, createdAt: new Date() },
+    }),
+  ));
+  return scored;
+}
+
 // Upsert Adzuna rows into Job table by sourceHash (dedupe across pipelines).
 async function upsertJobs(rows: AdzunaJobRow[]): Promise<TJob[]> {
   const saved: TJob[] = [];
@@ -128,12 +173,77 @@ export async function GET(req: NextRequest, { params }: { params: { name: string
     }
   }
 
-  // 3. Attach per-user score (locked indicator if missing / stale)
+  // 3. Plan info — needed for auto-score eligibility
+  const user = await prisma.user.findUnique({
+    where: { id: session.user.id },
+    select: { planTier: true, isSuperUser: true, adTickets: true },
+  });
+  const tier = user?.isSuperUser ? "max" : (user?.planTier ?? "free");
+  let proUsage = tier === "pro"
+    ? await getProMonthlyUsage(session.user.id, companyName)
+    : null;
+
+  // 4. Attach per-user score (locked indicator if missing / stale)
   const jobIds = jobsFromDb.map((j) => j.id);
   const scoreRows = jobIds.length
     ? await prisma.jobScore.findMany({ where: { userId: session.user.id, jobId: { in: jobIds } } })
     : [];
   const scoreByJobId = new Map(scoreRows.map((s) => [s.jobId, s]));
+
+  // ── Auto-score for Max (incl super user) and Pro within quota ────────
+  // Max: always auto-score missing/stale jobs.
+  // Pro: auto-score only if this is the user's first-or-second page-unlock
+  //      *for this company this month* (within the 2-page free quota).
+  // Free: never auto-score (must click 解鎖 to consume a ticket).
+  const missingJobs = jobsFromDb.filter((j) => {
+    const s = scoreByJobId.get(j.id);
+    return !s || (currentParsedHash !== null && s.parsedHash !== currentParsedHash);
+  });
+
+  const canAutoScore =
+    missingJobs.length > 0 && currentParsedHash !== null &&
+    (tier === "max" ||
+     (tier === "pro" && proUsage && proUsage.used < proUsage.quota));
+
+  if (canAutoScore) {
+    const resumeRow = await prisma.resume.findFirst({
+      where: { userId: session.user.id, isActive: true },
+      orderBy: { createdAt: "desc" },
+    });
+    if (resumeRow) {
+      const parsedResume = resumeRow.parsed as unknown as ParsedResume;
+      const prefs = await loadPrefs(session.user.id);
+      const fresh = await scoreAndPersist(
+        session.user.id,
+        missingJobs as unknown as TJob[],
+        parsedResume,
+        prefs,
+        currentParsedHash!,
+      );
+      // Merge new scores in
+      for (const s of fresh) {
+        scoreByJobId.set(s.jobId, {
+          jobId: s.jobId,
+          userId: session.user.id,
+          parsedHash: currentParsedHash!,
+          score: s.score,
+          reasons: s.reasons,
+          id: "fresh",
+          createdAt: new Date(),
+        });
+      }
+      // Pro: consume one quota unit (one page = one consumption)
+      if (tier === "pro") {
+        const month = new Date().toISOString().slice(0, 7);
+        await prisma.companyUnlockUsage.upsert({
+          where:  { userId_company_month: { userId: session.user.id, company: companyName, month } },
+          create: { userId: session.user.id, company: companyName, month, pagesUnlocked: 1 },
+          update: { pagesUnlocked: { increment: 1 } },
+        });
+        proUsage = await getProMonthlyUsage(session.user.id, companyName);
+      }
+    }
+  }
 
   const jobs = jobsFromDb.map((j) => {
     const s = scoreByJobId.get(j.id);
@@ -143,19 +253,9 @@ export async function GET(req: NextRequest, { params }: { params: { name: string
       score:        fresh ? s.score   : null,
       matchReasons: fresh ? s.reasons : [],
       locked:       !fresh,
-      staleScore:   !!s && !fresh,   // had a score but resume changed
+      staleScore:   !!s && !fresh,
     };
   });
-
-  // 4. Plan info for the UI
-  const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    select: { planTier: true, isSuperUser: true, adTickets: true },
-  });
-  const tier = user?.isSuperUser ? "max" : (user?.planTier ?? "free");
-  const proUsage = tier === "pro"
-    ? await getProMonthlyUsage(session.user.id, companyName)
-    : null;
 
   const total = await prisma.job.count({
     where: { company: { contains: companyName, mode: "insensitive" }, source: "adzuna" },
@@ -257,42 +357,15 @@ export async function POST(req: NextRequest, { params }: { params: { name: strin
     return NextResponse.json({ error: "NO_USER" }, { status: 401 });
   }
 
-  // 5. Load preferences for scoring
-  const prefRow = await prisma.preference.findUnique({
-    where: { userId: session.user.id },
-  });
-  const prefs: JobPreference = {
-    locations:  prefRow?.locations  ?? [],
-    salaryMin:  prefRow?.salaryMin  ?? 0,
-    salaryMax:  prefRow?.salaryMax  ?? null,
-    salaryCcy:  prefRow?.salaryCcy  ?? "TWD",
-    industries: prefRow?.industries ?? [],
-    employment: prefRow?.employment ?? [],
-    remote:     prefRow?.remote     ?? [],
-    languages:  prefRow?.languages  ?? [],
-    titles:     prefRow?.titles     ?? "",
-  };
-
-  // 6. Score in parallel (small batch, OK to fire together for 10 jobs)
-  const scored = await Promise.all(
-    jobs.map(async (j) => {
-      try {
-        const { score, reasons } = await scoreJob(j as unknown as TJob, parsedResume, prefs);
-        return { jobId: j.id, score, reasons };
-      } catch {
-        return { jobId: j.id, score: 0.5, reasons: ["AI 評分失敗，預設 50 分"] };
-      }
-    }),
+  // 5. Score and persist via shared helper
+  const prefs = await loadPrefs(session.user.id);
+  const scored = await scoreAndPersist(
+    session.user.id,
+    jobs as unknown as TJob[],
+    parsedResume,
+    prefs,
+    parsedHash,
   );
-
-  // 7. Upsert JobScore for each
-  await Promise.all(scored.map((s) =>
-    prisma.jobScore.upsert({
-      where:  { userId_jobId: { userId: session.user.id, jobId: s.jobId } },
-      create: { userId: session.user.id, jobId: s.jobId, parsedHash, score: s.score, reasons: s.reasons },
-      update: { parsedHash, score: s.score, reasons: s.reasons, createdAt: new Date() },
-    }),
-  ));
 
   return NextResponse.json({
     ok: true,

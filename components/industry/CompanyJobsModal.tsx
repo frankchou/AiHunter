@@ -126,25 +126,27 @@ export function CompanyJobsModal({
           <button className="btn" onClick={onClose} style={{ fontSize: 12 }}>✕ 關閉</button>
         </div>
 
-        {/* Top action bar — unlock + recalculate */}
+        {/* Top action bar — unlock (Free only) + recalculate (Pro/Max) */}
         {data && (
           <div style={{ padding: "10px 20px", borderBottom: "1px solid var(--line)", background: "var(--bg-soft)", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            {pageHasLocks && (
+            {/* Free: must explicitly click to consume ticket */}
+            {pageHasLocks && data.policy.tier === "free" && (
               <button
                 className="btn primary"
                 onClick={() => unlockPage()}
                 disabled={unlocking}
                 style={{ fontSize: 13 }}
               >
-                {unlocking
-                  ? "解鎖中…"
-                  : data.policy.tier === "free"
-                    ? `🔓 解鎖此頁分數（1 張解析券）`
-                    : data.policy.tier === "pro"
-                      ? `🔓 解鎖此頁分數（Pro 免費）`
-                      : `🔓 解鎖此頁分數`}
+                {unlocking ? "解鎖中…" : "🔓 解鎖此頁分數（1 張解析券）"}
               </button>
             )}
+            {/* Pro past quota: locks appear, no manual unlock button — must wait next month or upgrade */}
+            {pageHasLocks && data.policy.tier === "pro" && (
+              <span style={{ fontSize: 12, color: "oklch(45% .15 60)" }}>
+                ⚠️ 本月免費額度已用完（{data.policy.proUsage?.used ?? 0}/{data.policy.proUsage?.quota ?? 2}）
+              </span>
+            )}
+            {/* Recalculate: Pro/Max only, when current page is all scored */}
             {everyJobScored && data.policy.canRecalculate && (
               <button
                 className="btn"
@@ -159,7 +161,10 @@ export function CompanyJobsModal({
             <div style={{ flex: 1 }} />
             <div style={{ fontSize: 11, color: "var(--ink-3)" }}>
               {data.policy.tier === "free" && <>解析券：{data.policy.tickets} 張</>}
-              {data.policy.tier === "max"  && <>Max 旗艦 · 無限解鎖</>}
+              {data.policy.tier === "pro" && data.policy.proUsage && (
+                <>Pro · 本月此公司已用 {data.policy.proUsage.used}/{data.policy.proUsage.quota} 頁</>
+              )}
+              {data.policy.tier === "max"  && <>Max 旗艦 · 自動評分、無限解鎖</>}
             </div>
           </div>
         )}

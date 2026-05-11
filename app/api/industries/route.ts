@@ -4,7 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { INDUSTRIES } from "@/lib/mock-data";
 import { consumeUsage } from "@/lib/billing";
-import { countriesForRegion, probeCompanyJobCount } from "@/lib/job-sources/adzuna-company";
+import { countriesForRegion, probeAndIngestCompanyJobs } from "@/lib/job-sources/adzuna-company";
 import Anthropic from "@anthropic-ai/sdk";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -102,16 +102,52 @@ export async function GET(req: NextRequest) {
       // ── AI Top 20 generation ───────────────────────────────────────
       payload = (await generateIndustryTop(industry)) as Payload;
 
-      // ── Adzuna jobCount probe per company (1 query per country) ─────
-      // Lightweight: results_per_page=1, only reads `count` field. We only
-      // do this at refresh time so the IndustryCache stores authoritative
-      // counts for the next 7 days, decoupled from per-page-load lookups.
+      // ── Adzuna fetch + ingest + count per company ──────────────────
+      // We don't just probe — we fetch the actual matching rows (up to 50
+      // per country), upsert them into the Job table, and use the
+      // post-filtered count for the badge. This guarantees badge == modal.
+      // Cost: one Adzuna query per country per company (~20-80 queries
+      // per refresh, well within the 1000/month free tier).
       const enriched = await Promise.all(
         payload.companies.map(async (c) => {
           try {
             const countries = countriesForRegion(c.region);
-            const jobCount  = await probeCompanyJobCount(c.name, countries);
-            return { ...c, jobCount };
+            const rows = await probeAndIngestCompanyJobs(c.name, countries);
+
+            // Upsert each into Job table (dedupe by externalId)
+            await Promise.all(rows.map((r) =>
+              prisma.job.upsert({
+                where:  { externalId: r.externalId },
+                create: {
+                  externalId:  r.externalId,
+                  title:       r.title,
+                  company:     r.company,
+                  country:     r.country,
+                  city:        r.city,
+                  remote:      r.remote,
+                  type:        r.type,
+                  salaryMin:   r.salaryMin,
+                  salaryMax:   r.salaryMax,
+                  ccy:         r.ccy,
+                  yearsMin:    r.yearsMin,
+                  yearsMax:    r.yearsMax,
+                  industry:    r.industry,
+                  skills:      r.skills,
+                  description: r.description,
+                  source:      r.source,
+                  sourceUrl:   r.sourceUrl,
+                  sourceHash:  r.sourceHash,
+                  postedAt:    r.postedAt,
+                },
+                update: {
+                  description: r.description,
+                  salaryMin:   r.salaryMin,
+                  salaryMax:   r.salaryMax,
+                },
+              }).catch(() => null),
+            ));
+
+            return { ...c, jobCount: rows.length };
           } catch {
             return { ...c, jobCount: 0 };
           }

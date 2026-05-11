@@ -71,46 +71,30 @@ function getKey() {
   return { appId, appKey };
 }
 
-// Adzuna's `company=` parameter 400s for some company names (e.g. OpenAI,
-// Anthropic) — likely because they're not in Adzuna's normalised company
-// index. We fall back to `what_phrase=` which searches the full job text.
-// The fallback's count is an UPPER BOUND (it counts jobs that mention the
-// company name anywhere, not strictly "jobs at"). Acceptable for the
-// badge — the modal post-filters by company-name match for the real list.
-async function adzunaProbeOne(country: string, companyName: string, k: { appId: string; appKey: string }): Promise<number> {
-  const base = `https://api.adzuna.com/v1/api/jobs/${country}/search/1`;
-  const common = { app_id: k.appId, app_key: k.appKey, results_per_page: 1 };
+// The probe MUST match what the modal will actually show: we fetch page 1
+// (up to 50 results per country) and post-filter by `company.display_name`
+// so the badge number == the modal's reality. The previous version that
+// just read Adzuna's raw `count` field was wildly off for any company we
+// had to use the `what_phrase=` fallback for — that count is "jobs that
+// mention this string in the JD", not "jobs at this company".
+export async function probeAndIngestCompanyJobs(
+  companyName: string,
+  countries: string[],
+): Promise<AdzunaJobRow[]> {
+  const k = getKey();
+  if (!k || !companyName.trim()) return [];
 
-  // 1) Try strict company filter first
-  try {
-    const { data } = await axios.get<AdzunaSearchResponse>(base, {
-      params: { ...common, company: companyName },
-      timeout: 10_000,
-    });
-    return data.count ?? 0;
-  } catch (err) {
-    const status = (err as { response?: { status?: number } })?.response?.status;
-    if (status !== 400 && status !== 404) return 0; // unrecoverable
-  }
-
-  // 2) Fallback: phrase search across all fields
-  try {
-    const { data } = await axios.get<AdzunaSearchResponse>(base, {
-      params: { ...common, what_phrase: companyName },
-      timeout: 10_000,
-    });
-    return data.count ?? 0;
-  } catch {
-    return 0;
-  }
+  // Use the same fetch+filter pipeline as the modal — gives consistent count
+  return fetchCompanyJobsPage(companyName, countries, { page: 1, pageSize: 50 });
 }
 
-// Lightweight count probe across the given countries — 1 query each.
+// Back-compat shim — returns the count from probeAndIngestCompanyJobs.
+// Callers that just need a number can use this; callers that want to also
+// upsert the jobs at refresh time should use probeAndIngestCompanyJobs
+// directly so they don't have to re-query Adzuna.
 export async function probeCompanyJobCount(companyName: string, countries: string[]): Promise<number> {
-  const k = getKey();
-  if (!k || !companyName.trim()) return 0;
-  const counts = await Promise.all(countries.map((c) => adzunaProbeOne(c, companyName, k)));
-  return counts.reduce((a, b) => a + b, 0);
+  const rows = await probeAndIngestCompanyJobs(companyName, countries);
+  return rows.length;
 }
 
 // Fetch one page of jobs for a company. Spread across `countries` —
