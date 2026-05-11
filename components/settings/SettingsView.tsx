@@ -10,6 +10,7 @@ const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 interface UserProfile {
   planTier: string;
+  isSuperUser?: boolean;
   insightsUsed: number;
   analysisUsed: number;
   usageMonth: string | null;
@@ -21,7 +22,8 @@ export function SettingsView() {
   const router = useRouter();
   const { data: profile } = useSWR<UserProfile>("/api/user/profile", fetcher);
 
-  const tier = (profile?.planTier ?? "free") as PlanTier;
+  // SuperUser bypasses all plan limits → render as Max for status displays.
+  const tier = ((profile?.isSuperUser ? "max" : profile?.planTier) ?? "free") as PlanTier;
   const plan = PLANS[tier];
   const month = currentMonth();
   const resetNeeded = profile?.usageMonth !== month;

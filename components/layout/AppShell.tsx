@@ -14,13 +14,17 @@ interface NavItem {
   maxOnly?: boolean;
 }
 
-const NAV: NavItem[] = [
+interface NavItemWithFlags extends NavItem {
+  hideForMax?: boolean;   // suppress for users already at the top tier
+}
+
+const NAV: NavItemWithFlags[] = [
   { id: "feed",     href: "/feed",     label: "職缺流",         icon: "⚡" },
   { id: "saved",    href: "/saved",    label: "我的收藏",       icon: "★" },
   { id: "resume",   href: "/resume",   label: "履歷",           icon: "📄" },
   { id: "resumes",  href: "/resumes",  label: "履歷版本",       icon: "📁", maxOnly: true },
   { id: "industry", href: "/industry", label: "產業 Top 20",    icon: "🏢" },
-  { id: "pricing",  href: "/pricing",  label: "升級方案",       icon: "🚀" },
+  { id: "pricing",  href: "/pricing",  label: "升級方案",       icon: "🚀", hideForMax: true },
   { id: "settings", href: "/settings", label: "設定",           icon: "⚙" },
 ];
 
@@ -43,7 +47,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     { revalidateOnFocus: false }
   );
   const isMax = profile?.isSuperUser || profile?.planTier === "max";
-  const visibleNav = NAV.filter((n) => !n.maxOnly || isMax);
+  const visibleNav = NAV.filter((n) => {
+    if (n.maxOnly && !isMax) return false;
+    if (n.hideForMax && isMax) return false;
+    return true;
+  });
 
   const currentNav = visibleNav.find((n) => pathname.startsWith(n.href));
   const pageTitle = pathname.startsWith("/job/") ? "職缺詳情" : (currentNav?.label ?? "AI Hunter");
