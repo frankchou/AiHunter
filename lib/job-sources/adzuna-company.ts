@@ -103,7 +103,13 @@ export function canonicalCompanyName(name: string): string {
 // rows where the display_name actually contains the company name, and use
 // THAT count for the badge. The modal applies the same filter, so the
 // numbers match.
-const PHRASE_SAMPLE_SIZE = 50;
+const PHRASE_SAMPLE_SIZE = 50;        // Adzuna's per-page max
+// Deep-scan budget: how many Adzuna pages we'll walk for what_phrase
+// fallback. 20 × 50 = 1000 candidates per country. Beyond that the
+// match-yield falls off and the API-call cost (vs Adzuna's free 250k
+// quota) starts mattering. Refresh is a rare operation so the runtime
+// hit (a few seconds per fallback company) is acceptable.
+const PHRASE_FALLBACK_PAGES = 20;
 
 function matchesDisplayName(j: AdzunaApiJob, companyName: string): boolean {
   const dn = j.company?.display_name;
@@ -111,31 +117,56 @@ function matchesDisplayName(j: AdzunaApiJob, companyName: string): boolean {
   return dn.toLowerCase().includes(companyName.toLowerCase());
 }
 
+// Deep-scan the what_phrase fallback path. Adzuna's strict `company=` index
+// doesn't include many AI-native employers (OpenAI, Anthropic etc.) — for
+// those we look at what_phrase results and post-filter by display_name. A
+// single 50-row page often surfaces ZERO real matches because the top
+// results are jobs at OTHER companies that just mention the employer in
+// the JD. Paginating up to PHRASE_FALLBACK_PAGES surfaces the real matches
+// that exist deeper in the result set.
+async function deepScanWhatPhrase(
+  country: string,
+  companyName: string,
+  k: { appId: string; appKey: string },
+): Promise<AdzunaApiJob[]> {
+  const matched: AdzunaApiJob[] = [];
+  for (let page = 1; page <= PHRASE_FALLBACK_PAGES; page++) {
+    try {
+      const { data } = await axios.get<AdzunaSearchResponse>(
+        `https://api.adzuna.com/v1/api/jobs/${country}/search/${page}`,
+        {
+          params: { app_id: k.appId, app_key: k.appKey, results_per_page: PHRASE_SAMPLE_SIZE, sort_by: "date", what_phrase: companyName },
+          timeout: 12_000,
+        },
+      );
+      const rows = data.results ?? [];
+      for (const j of rows) if (matchesDisplayName(j, companyName)) matched.push(j);
+      if (rows.length < PHRASE_SAMPLE_SIZE) break;   // hit the end
+    } catch {
+      break;
+    }
+  }
+  return matched;
+}
+
 async function adzunaCountOne(country: string, companyName: string, k: { appId: string; appKey: string }): Promise<number> {
-  const base = `https://api.adzuna.com/v1/api/jobs/${country}/search/1`;
   // Strict path: Adzuna's company index is authoritative — use its count as-is.
   try {
-    const { data } = await axios.get<AdzunaSearchResponse>(base, {
-      params: { app_id: k.appId, app_key: k.appKey, results_per_page: 1, company: companyName },
-      timeout: 10_000,
-    });
+    const { data } = await axios.get<AdzunaSearchResponse>(
+      `https://api.adzuna.com/v1/api/jobs/${country}/search/1`,
+      {
+        params: { app_id: k.appId, app_key: k.appKey, results_per_page: 1, company: companyName },
+        timeout: 10_000,
+      },
+    );
     return data.count ?? 0;
   } catch {
-    /* fall through to phrase fallback */
+    /* fall through */
   }
-  // Phrase fallback: pull a sample and count rows that actually match this
-  // employer's display_name. Returns a lower bound (only first 50 results
-  // by relevance) but it's the same lower bound the modal will display, so
-  // badge stays consistent with list.
-  try {
-    const { data } = await axios.get<AdzunaSearchResponse>(base, {
-      params: { app_id: k.appId, app_key: k.appKey, results_per_page: PHRASE_SAMPLE_SIZE, what_phrase: companyName },
-      timeout: 12_000,
-    });
-    return (data.results ?? []).filter((j) => matchesDisplayName(j, companyName)).length;
-  } catch {
-    return 0;
-  }
+  // Phrase fallback: deep-scan + post-filter. Counts what we'd ACTUALLY
+  // show in the modal, so badge and list always agree on the same set.
+  const matched = await deepScanWhatPhrase(country, companyName, k);
+  return matched.length;
 }
 
 export async function probeCompanyJobCount(companyName: string, countries: string[]): Promise<number> {
@@ -146,20 +177,85 @@ export async function probeCompanyJobCount(companyName: string, countries: strin
   return counts.reduce((a, b) => a + b, 0);
 }
 
-// Also ingest the first page worth of jobs at refresh time so modal page 1
-// is already in our Job table. Modal pages 2+ fetch on-demand.
+// Single-shot per-country probe that returns BOTH the authoritative count
+// AND the matched rows in ONE pass. Strict path: count = Adzuna's
+// data.count (could be thousands); rows = first 50 by date. Fallback path:
+// count = matched.length; rows = all matched (typically much smaller).
+async function scanCountryProbeAndRows(
+  country: string,
+  companyName: string,
+  k: { appId: string; appKey: string },
+): Promise<{ count: number; rows: AdzunaApiJob[] }> {
+  // Strict path. data.count is real total; data.results is just this page.
+  try {
+    const { data } = await axios.get<AdzunaSearchResponse>(
+      `https://api.adzuna.com/v1/api/jobs/${country}/search/1`,
+      {
+        params: { app_id: k.appId, app_key: k.appKey, results_per_page: PHRASE_SAMPLE_SIZE, sort_by: "date", company: companyName },
+        timeout: 12_000,
+      },
+    );
+    return { count: data.count ?? 0, rows: data.results ?? [] };
+  } catch {
+    /* fall through */
+  }
+  // Fallback path. Deep scan + post-filter is the only way to know the
+  // real number of jobs whose display_name is this employer.
+  const matched = await deepScanWhatPhrase(country, companyName, k);
+  return { count: matched.length, rows: matched };
+}
+
+// At refresh time, get the authoritative count AND ingest every matched
+// row across all configured countries in one pass. Caller upserts the
+// rows into the Job table so the modal can paginate from DB without
+// re-hitting Adzuna on each page change (modal page-2 onwards for strict
+// employers like Google still hits Adzuna on-demand because we only
+// pre-load page 1 for those).
 export async function probeAndIngestCompanyJobs(
   companyName: string,
   countries: string[],
 ): Promise<{ count: number; firstPageJobs: AdzunaJobRow[] }> {
   const k = getKey();
   if (!k || !companyName.trim()) return { count: 0, firstPageJobs: [] };
+  const lookup = canonicalCompanyName(companyName);
 
-  const [count, firstPageJobs] = await Promise.all([
-    probeCompanyJobCount(companyName, countries),
-    fetchCompanyJobsPage(companyName, countries, { page: 1, pageSize: 10 }),
-  ]);
-  return { count, firstPageJobs };
+  const perCountry = await Promise.all(
+    countries.map((c) => scanCountryProbeAndRows(c, lookup, k).then((r) => ({ country: c, ...r }))),
+  );
+
+  const count = perCountry.reduce((s, r) => s + r.count, 0);
+
+  const flat: AdzunaJobRow[] = [];
+  for (const { country, rows } of perCountry) {
+    for (const j of rows) {
+      if (!j.company?.display_name) continue;
+      const area = j.location?.area ?? [];
+      const city = area[area.length - 1] ?? j.location?.display_name ?? country.toUpperCase();
+      flat.push({
+        externalId:  `adzuna_${j.id}`,
+        title:       j.title,
+        company:     j.company.display_name,
+        country:     country.toUpperCase(),
+        city,
+        remote:      j.title.toLowerCase().includes("remote") ? "remote" : "onsite",
+        type:        j.contract_type === "permanent" ? "Full-time" : (j.contract_type ?? "Full-time"),
+        salaryMin:   j.salary_min ?? null,
+        salaryMax:   j.salary_max ?? null,
+        ccy:         COUNTRY_CCY[country] ?? "USD",
+        yearsMin:    null,
+        yearsMax:    null,
+        industry:    "tech.saas",
+        skills:      [],
+        description: (j.description ?? "").slice(0, 2000),
+        source:      "adzuna",
+        sourceUrl:   j.redirect_url,
+        sourceHash:  hashUrl(j.redirect_url),
+        postedAt:    j.created ? new Date(j.created) : null,
+      });
+    }
+  }
+  flat.sort((a, b) => (b.postedAt?.getTime() ?? 0) - (a.postedAt?.getTime() ?? 0));
+  return { count, firstPageJobs: flat };
 }
 
 // Fetch one page of jobs for a company. Spread across `countries` —
@@ -173,37 +269,26 @@ async function adzunaFetchCountry(
   perPage: number,
   k: { appId: string; appKey: string },
 ): Promise<AdzunaApiJob[]> {
-  const url = `https://api.adzuna.com/v1/api/jobs/${country}/search/${page}`;
-  // sort_by=date gives stable pagination — without it Adzuna returns by
-  // "relevance" which causes the top jobs to bleed across many pages so
-  // page 2/3/… end up mostly duplicates of page 1.
-
-  // Strict path: trust Adzuna's company-indexed results as-is.
+  // Strict path: trust Adzuna's company-indexed results as-is, page-by-page.
   try {
-    const { data } = await axios.get<AdzunaSearchResponse>(url, {
-      params: { app_id: k.appId, app_key: k.appKey, results_per_page: perPage, sort_by: "date", company: companyName },
-      timeout: 12_000,
-    });
+    const { data } = await axios.get<AdzunaSearchResponse>(
+      `https://api.adzuna.com/v1/api/jobs/${country}/search/${page}`,
+      {
+        params: { app_id: k.appId, app_key: k.appKey, results_per_page: perPage, sort_by: "date", company: companyName },
+        timeout: 12_000,
+      },
+    );
     return data.results ?? [];
   } catch {
     /* fall through to phrase fallback */
   }
-  // Phrase fallback: post-filter by display_name. The post-filter yields a
-  // RARE subset of the raw what_phrase results (often <10% match), so we
-  // MUST oversample — using the caller's perPage (typically 10) often
-  // returns zero matches even when matches exist deeper in the page. Pull
-  // PHRASE_SAMPLE_SIZE per country, filter, then let the caller slice.
-  // This is also what adzunaCountOne uses, so badge count and the
-  // fetched rows come from the same sample.
-  try {
-    const { data } = await axios.get<AdzunaSearchResponse>(url, {
-      params: { app_id: k.appId, app_key: k.appKey, results_per_page: PHRASE_SAMPLE_SIZE, sort_by: "date", what_phrase: companyName },
-      timeout: 12_000,
-    });
-    return (data.results ?? []).filter((j) => matchesDisplayName(j, companyName));
-  } catch {
-    return [];
-  }
+  // Phrase fallback: deep-scan across multiple Adzuna pages, post-filter
+  // by display_name, then return the slice the caller asked for. Caller
+  // pagination (`page`, `perPage`) applies AFTER the post-filter, so
+  // modal page 1 = first N display_name matches by date.
+  const matched = await deepScanWhatPhrase(country, companyName, k);
+  const start = (page - 1) * perPage;
+  return matched.slice(start, start + perPage);
 }
 
 export async function fetchCompanyJobsPage(
