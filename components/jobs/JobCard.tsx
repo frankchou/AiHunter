@@ -8,16 +8,31 @@ interface Props {
   job: Job;
   saved: boolean;
   onSave: () => void;
+  // Top 20 modal context: score is locked behind paywall until user unlocks the page.
+  // When true, ScorePill shows 🔒 instead of "— 分" pending state.
+  locked?: boolean;
+  staleScore?: boolean;  // true if score exists but resume has changed since
 }
 
-function ScorePill({ score }: { score: number | null }) {
+function ScorePill({ score, locked, staleScore }: { score: number | null; locked?: boolean; staleScore?: boolean }) {
+  if (locked) {
+    return (
+      <span
+        className="score-pill pending"
+        title={staleScore ? "履歷已更新，請重新計算分數" : "尚未解鎖分數"}
+        style={{ background: "var(--bg-soft)", color: "var(--ink-3)", border: "1px dashed var(--line)" }}
+      >
+        🔒 鎖定
+      </span>
+    );
+  }
   if (score == null) return <span className="score-pill pending" title="待 AI 評分">— 分</span>;
   const pct = Math.round(score * 100);
   const cls = pct >= 75 ? "high" : pct >= 50 ? "mid" : "low";
   return <span className={`score-pill ${cls}`} title="AI 推薦適合度">{pct} 分</span>;
 }
 
-export function JobCard({ job, saved, onSave }: Props) {
+export function JobCard({ job, saved, onSave, locked, staleScore }: Props) {
   const cultureTags = extractCultureTags(job.description ?? "");
 
   return (
@@ -49,7 +64,7 @@ export function JobCard({ job, saved, onSave }: Props) {
         )}
       </div>
       <div className="job-side">
-        <ScorePill score={job.score ?? null} />
+        <ScorePill score={job.score ?? null} locked={locked} staleScore={staleScore} />
         <button className={`btn star${saved ? " on" : ""}`} onClick={onSave}>
           {saved ? "★ 已收藏" : "☆ 收藏"}
         </button>

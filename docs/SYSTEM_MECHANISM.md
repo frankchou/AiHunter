@@ -146,6 +146,43 @@ STRIPE_PRO_PRICE_ID=price_...
 STRIPE_MAX_PRICE_ID=price_...
 ```
 
+### Top 20 各公司職缺清單（**新機制**）
+
+**入口**：產業頁每間公司有「工作機會 (N)」徽章，N 是該公司在 Adzuna 的職缺總數。點擊 → 開啟 **Fancybox 風格 modal**。
+
+**資料來源**：Adzuna API（按公司名查），多國家並行 probe（依 AI 給的 `region` tag 動態決定）。Adzuna 沒覆蓋的國家（JP/KR/HK/CN）會顯示 0。
+
+**取得 jobCount 的時機**：只在「強制更新」產業頁時 probe，存進 IndustryCache（7 天），平常瀏覽 0 額外 API 呼叫。
+
+**Modal 內容**：分頁顯示（10 筆/頁），每筆用 JobCard 樣式，與職缺流卡片視覺一致。
+
+#### Per-user 評分（per-page 解鎖）
+
+| Plan | 解鎖規則 |
+|------|---------|
+| **Free** | 每張解析券（廣告券通用）解鎖 1 頁（10 個職缺）|
+| **Pro** | **每月每家公司前 2 頁免費**；超過 → 🔒 → 提示「升級 Max」或「等下月額度」（**不接受券支付**）|
+| **Max** | 無限解鎖、無限重新計算 |
+
+**「重新計算」按鈕**（僅 Pro/Max 顯示）：
+- 條件：當前 `Resume.parsedHash` ≠ 已評分的 `JobScore.parsedHash`
+- 若履歷沒新版本 → toast：「請先到「履歷」頁上傳新版」
+- 重算成本同初次解鎖（消耗 Pro 月度配額或 Max 免費）
+
+**分數永久保留**：一旦評分成功，存進 `JobScore` 表，下次打開同公司同職缺**直接讀取**、零成本（除非履歷有新版本）。
+
+#### 跟職缺流的雙向獨立
+
+| 維度 | 職缺流 `/feed` | Top 20 Modal |
+|------|---------------|--------------|
+| 分數欄位 | `Job.score`（generic、隨職缺流評分時機更新）| `JobScore[userId][jobId]`（per-user、按解鎖時機）|
+| 評分時機 | 使用者首次進職缺流 / 手動點「更新職缺」| 使用者按「解鎖此頁分數」按鈕 |
+| 評分動作影響 | 寫 Job.score | 寫 JobScore，**不影響** Job.score |
+
+**收藏連動**：兩邊都用 `JobCard` + `/api/saved`，同一個 jobId 在三處（職缺流、Modal、/saved）**自動雙向同步**。
+
+---
+
 ### 公司最近一季財報（產業 Top 20）
 
 展開公司行後顯示：

@@ -6,8 +6,15 @@ export const TICKET_COSTS = {
   insight:          1,
   analysis:         1,  // resume parse + analyze (shared counter)
   industryRefresh:  3,
+  companyScoring:   1,  // unlock 1 page (10 jobs) of company scoring in Top 20 modal
 } as const;
 export type BillAction = keyof typeof TICKET_COSTS;
+
+// Company-scoring page size (jobs per "page", matches 1 ticket = 10 jobs rule)
+export const COMPANY_SCORING_PAGE_SIZE = 10;
+
+// Pro plan monthly free allowance per company (in pages)
+export const PRO_COMPANY_FREE_PAGES_PER_MONTH = 2;
 
 // ── Ad session config ────────────────────────────────────────────────────────
 export const AD_DURATION_SEC       = 30;   // seconds per individual ad
@@ -42,6 +49,7 @@ export const PLANS = {
       "AI 深度分析 3 次 / 月",
       "履歷解析 + CV 編寫 3 次 / 月（共用配額）",
       "看廣告獲得解析券（每月上限 5 次）",
+      "公司職缺評分：每張券解鎖 10 個職缺",
     ],
   },
   pro: {
@@ -64,7 +72,8 @@ export const PLANS = {
       "AI 深度分析 30 次 / 月",
       "履歷解析 + CV 編寫 15 次 / 月（共用配額）",
       "產業 Top 20 強制更新",
-      "無廣告",
+      "✨ 無廣告",
+      "✨ 每月每家公司 2 頁職缺評分免費（含重新計算）",
     ],
   },
   max: {
@@ -86,6 +95,7 @@ export const PLANS = {
     features: [
       "AI 深度分析無限次",
       "履歷解析 + CV 編寫無限次",
+      "✨ 公司職缺評分：無限解鎖、無限重新計算",
       "針對性履歷 + 針對性 CV（每職缺一份，無限產生）",
       "履歷版本夾（集中管理所有版本）",
       "AI 模擬面試（即將推出）",

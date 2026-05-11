@@ -1,11 +1,16 @@
 import { prisma } from "@/lib/prisma";
-import { getPlan, currentMonth, TICKET_COSTS, type BillAction } from "@/lib/plans";
+import {
+  getPlan, currentMonth, TICKET_COSTS,
+  PRO_COMPANY_FREE_PAGES_PER_MONTH,
+  type BillAction,
+} from "@/lib/plans";
 
 // Maps action → DB field that tracks its monthly usage
 const ACTION_FIELD: Partial<Record<BillAction, "insightsUsed" | "analysisUsed">> = {
   insight:  "insightsUsed",
   analysis: "analysisUsed",   // shared counter: resume parse + analyze + general CV write/draft
-  // industryRefresh has no counter: free=always tickets, pro/max=unlimited
+  // industryRefresh: no counter (free=tickets, pro/max=unlimited)
+  // companyScoring: handled by dedicated consumeCompanyScoring() — per-company-per-month
 };
 
 function getLimit(action: BillAction, tier: string): number | null {
@@ -14,6 +19,7 @@ function getLimit(action: BillAction, tier: string): number | null {
     case "insight":         return plan.limits.insightsPerMonth;
     case "analysis":        return plan.limits.analysisPerMonth;
     case "industryRefresh": return plan.limits.industryRefreshPerMonth;
+    case "companyScoring":  return null; // not applicable — use consumeCompanyScoring()
   }
 }
 
@@ -89,5 +95,107 @@ export async function consumeUsage(userId: string, action: BillAction): Promise<
     planTier: user.planTier ?? "free",
     tickets,
     adSessionsLeft: Math.max(0, 5 - effectiveAdSessions),
+  };
+}
+
+// ─── Company scoring (Top 20 modal) ──────────────────────────────────────
+//
+// Different from consumeUsage(): tracks per-company-per-month allowance for
+// Pro tier (hard-cap, no ticket fallback). Free uses tickets, Max is free.
+//
+// Returns ok:true if unlocked (and usage recorded). Otherwise returns reason
+// so UI can show the right prompt (升級 / 廣告券 / 等下月).
+
+export type CompanyScoringDeny =
+  | { ok: false; reason: "FREE_NO_TICKETS"; planTier: "free"; tickets: number; adSessionsLeft: number }
+  | { ok: false; reason: "PRO_QUOTA_EXCEEDED"; planTier: "pro"; pagesUnlocked: number; quotaMax: number; resetAt: string }
+  | { ok: false; reason: "NO_USER"; planTier: "free"; tickets: 0 };
+
+export type CompanyScoringResult =
+  | { ok: true; fromTicket: boolean; planTier: string }
+  | CompanyScoringDeny;
+
+function nextMonthFirstIso(): string {
+  const d = new Date();
+  const next = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1));
+  return next.toISOString().slice(0, 10);
+}
+
+export async function consumeCompanyScoring(
+  userId: string,
+  companyName: string,
+): Promise<CompanyScoringResult> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      isSuperUser:   true,
+      planTier:      true,
+      adTickets:     true,
+      adUnlocksUsed: true,
+      usageMonth:    true,
+    },
+  });
+  if (!user) return { ok: false, reason: "NO_USER", planTier: "free", tickets: 0 };
+
+  if (user.isSuperUser) return { ok: true, fromTicket: false, planTier: user.planTier };
+  if (user.planTier === "max") return { ok: true, fromTicket: false, planTier: "max" };
+
+  // Pro: hard-cap by monthly per-company allowance, no ticket fallback
+  if (user.planTier === "pro") {
+    const month = currentMonth();
+    const usage = await prisma.companyUnlockUsage.findUnique({
+      where: { userId_company_month: { userId, company: companyName, month } },
+    });
+    const pagesUsed = usage?.pagesUnlocked ?? 0;
+    if (pagesUsed < PRO_COMPANY_FREE_PAGES_PER_MONTH) {
+      await prisma.companyUnlockUsage.upsert({
+        where:  { userId_company_month: { userId, company: companyName, month } },
+        create: { userId, company: companyName, month, pagesUnlocked: 1 },
+        update: { pagesUnlocked: { increment: 1 } },
+      });
+      return { ok: true, fromTicket: false, planTier: "pro" };
+    }
+    return {
+      ok: false,
+      reason: "PRO_QUOTA_EXCEEDED",
+      planTier: "pro",
+      pagesUnlocked: pagesUsed,
+      quotaMax: PRO_COMPANY_FREE_PAGES_PER_MONTH,
+      resetAt: nextMonthFirstIso(),
+    };
+  }
+
+  // Free: pay 1 ticket per page
+  const cost = TICKET_COSTS.companyScoring;
+  if (user.adTickets >= cost) {
+    await prisma.user.update({
+      where: { id: userId },
+      data:  { adTickets: { decrement: cost } },
+    });
+    return { ok: true, fromTicket: true, planTier: "free" };
+  }
+  const month = currentMonth();
+  const resetNeeded = user.usageMonth !== month;
+  const effectiveAdSessions = resetNeeded ? 0 : user.adUnlocksUsed;
+  return {
+    ok: false,
+    reason: "FREE_NO_TICKETS",
+    planTier: "free",
+    tickets: user.adTickets,
+    adSessionsLeft: Math.max(0, 5 - effectiveAdSessions),
+  };
+}
+
+// Read-only: how many pages a Pro user has unlocked for this company this month.
+// Used by UI to show "2/2 已用" before they try to click.
+export async function getProMonthlyUsage(userId: string, companyName: string): Promise<{ used: number; quota: number; resetAt: string }> {
+  const month = currentMonth();
+  const usage = await prisma.companyUnlockUsage.findUnique({
+    where: { userId_company_month: { userId, company: companyName, month } },
+  });
+  return {
+    used:    usage?.pagesUnlocked ?? 0,
+    quota:   PRO_COMPANY_FREE_PAGES_PER_MONTH,
+    resetAt: nextMonthFirstIso(),
   };
 }

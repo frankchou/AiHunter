@@ -4,6 +4,7 @@ import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { INDUSTRIES } from "@/lib/mock-data";
 import { consumeUsage } from "@/lib/billing";
+import { countriesForRegion, probeCompanyJobCount } from "@/lib/job-sources/adzuna-company";
 import Anthropic from "@anthropic-ai/sdk";
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
@@ -74,8 +75,15 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    type RawCompany = { name: string; [k: string]: unknown };
-    type Payload   = { companies: RawCompany[] };
+    // jobCount is now persisted INSIDE the IndustryCache payload (added at refresh time)
+    type RawCompany = {
+      name:      string;
+      region?:   string;
+      ticker?:   string | null;
+      jobCount?: number;   // attached at refresh time via Adzuna probe
+      [k: string]: unknown;
+    };
+    type Payload = { companies: RawCompany[] };
     let payload: Payload | undefined;
     let cached = false;
 
@@ -91,33 +99,34 @@ export async function GET(req: NextRequest) {
     }
 
     if (!payload) {
+      // ── AI Top 20 generation ───────────────────────────────────────
       payload = (await generateIndustryTop(industry)) as Payload;
+
+      // ── Adzuna jobCount probe per company (1 query per country) ─────
+      // Lightweight: results_per_page=1, only reads `count` field. We only
+      // do this at refresh time so the IndustryCache stores authoritative
+      // counts for the next 7 days, decoupled from per-page-load lookups.
+      const enriched = await Promise.all(
+        payload.companies.map(async (c) => {
+          try {
+            const countries = countriesForRegion(c.region);
+            const jobCount  = await probeCompanyJobCount(c.name, countries);
+            return { ...c, jobCount };
+          } catch {
+            return { ...c, jobCount: 0 };
+          }
+        }),
+      );
+      payload = { ...payload, companies: enriched };
+
       await prisma.industryCache.upsert({
-        where: { industry },
+        where:  { industry },
         create: { industry, data: payload as unknown as object },
         update: { data: payload as unknown as object, updatedAt: new Date() },
       });
     }
 
-    // Attach live jobCount per company using case-insensitive contains match
-    // (DB stores company names like "台達電子工業股份有限公司 _DELTA ELECTRONICS INC."
-    //  while AI returns "Delta Electronics" — exact match misses these)
-    const counts = await Promise.all(
-      payload.companies.map(async (c) => {
-        if (!c.name) return [c.name, 0] as const;
-        const count = await prisma.job.count({
-          where: { company: { contains: c.name, mode: "insensitive" } },
-        });
-        return [c.name, count] as const;
-      })
-    );
-    const countByName = Object.fromEntries(counts);
-    const companies = payload.companies.map((c) => ({
-      ...c,
-      jobCount: countByName[c.name] ?? 0,
-    }));
-
-    return NextResponse.json({ companies, industries: INDUSTRIES, cached });
+    return NextResponse.json({ companies: payload.companies, industries: INDUSTRIES, cached });
   } catch (e) {
     console.error("[industries]", e);
     return NextResponse.json({ companies: [], industries: INDUSTRIES, error: String(e) });

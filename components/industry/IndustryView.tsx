@@ -1,9 +1,9 @@
 "use client";
-import Link from "next/link";
 import { useState, useMemo } from "react";
 import useSWR from "swr";
 import { INDUSTRIES } from "@/lib/mock-data";
 import { fmtCompactMoney, fmtPct } from "@/lib/utils";
+import { CompanyJobsModal } from "@/components/industry/CompanyJobsModal";
 import type { StockQuote } from "@/app/api/stocks/route";
 import type { QuarterlyFinancials } from "@/app/api/financials/route";
 
@@ -21,17 +21,6 @@ interface AiCompany {
   jobCount?: number;
 }
 
-interface JobLite {
-  id: string;
-  title: string;
-  city: string;
-  country: string;
-  remote: string;
-  salaryMin: number | null;
-  salaryMax: number | null;
-  ccy: string;
-  postedAt: string | null;
-}
 
 function PriceCell({ quote }: { quote: StockQuote | undefined }) {
   if (!quote) return <span style={{ color: "var(--ink-4)", fontSize: 11 }}>—</span>;
@@ -51,6 +40,7 @@ function PriceCell({ quote }: { quote: StockQuote | undefined }) {
 export function IndustryView() {
   const [selectedIndustry, setSelectedIndustry] = useState(INDUSTRIES[0].id);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [openCompany, setOpenCompany] = useState<{ name: string; count: number } | null>(null);
 
   const { data, isLoading } = useSWR<{ companies: AiCompany[]; cached: boolean }>(
     `/api/industries?industry=${selectedIndustry}&_r=${refreshKey}`,
@@ -134,38 +124,38 @@ export function IndustryView() {
                   company={c}
                   quote={c.ticker ? stockData?.[c.ticker] : undefined}
                   financials={c.ticker ? finData?.[c.ticker] : undefined}
+                  onOpenJobs={() => setOpenCompany({ name: c.name, count: c.jobCount ?? 0 })}
                 />
               ))}
             </tbody>
           </table>
         </div>
       )}
+
+      {openCompany && (
+        <CompanyJobsModal
+          companyName={openCompany.name}
+          totalApprox={openCompany.count}
+          onClose={() => setOpenCompany(null)}
+        />
+      )}
     </div>
   );
 }
 
-function CompanyRow({ company: c, quote, financials }: {
+function CompanyRow({ company: c, quote, financials, onOpenJobs }: {
   company: AiCompany;
   quote: StockQuote | undefined;
   financials: QuarterlyFinancials | undefined;
+  onOpenJobs: () => void;
 }) {
   const [expanded, setExpanded] = useState(false);
-  const [showJobs, setShowJobs]  = useState(false);
   const jobCount = c.jobCount ?? 0;
-
-  const { data: jobsData, isLoading: jobsLoading } = useSWR<{ jobs: JobLite[] }>(
-    expanded && showJobs && jobCount > 0
-      ? `/api/jobs?company=${encodeURIComponent(c.name)}&pageSize=50&sort=date`
-      : null,
-    fetcher,
-    { revalidateOnFocus: false }
-  );
 
   const onCountClick = (e: React.MouseEvent) => {
     e.stopPropagation();
     if (jobCount === 0) return;
-    setShowJobs(true);
-    setExpanded(true);
+    onOpenJobs();
   };
 
   return (
@@ -243,52 +233,8 @@ function CompanyRow({ company: c, quote, financials }: {
               </div>
             </div>
             <FinancialsBlock company={c} financials={financials} />
-            {showJobs && (
-              <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid var(--line)" }}>
-                <div className="eyebrow" style={{ marginBottom: 8 }}>工作機會 · {jobCount} 筆</div>
-                {jobsLoading && <div style={{ fontSize: 12, color: "var(--ink-3)" }}>載入中…</div>}
-                {!jobsLoading && jobsData?.jobs && jobsData.jobs.length === 0 && (
-                  <div style={{ fontSize: 12, color: "var(--ink-3)" }}>尚未抓到該公司職缺</div>
-                )}
-                {!jobsLoading && jobsData?.jobs && jobsData.jobs.length > 0 && (
-                  <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 6 }}>
-                    {jobsData.jobs.map((j) => (
-                      <li key={j.id}>
-                        <Link
-                          href={`/job/${j.id}`}
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                            gap: 12,
-                            padding: "8px 10px",
-                            background: "var(--bg)",
-                            border: "1px solid var(--line)",
-                            borderRadius: 6,
-                            fontSize: 12,
-                            textDecoration: "none",
-                            color: "var(--ink-1)",
-                          }}
-                        >
-                          <div style={{ fontWeight: 600, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {j.title}
-                          </div>
-                          <div style={{ fontSize: 11, color: "var(--ink-3)", display: "flex", gap: 8, flexShrink: 0 }}>
-                            <span>{j.city || j.country}</span>
-                            {j.remote && j.remote !== "onsite" && <span>· {j.remote}</span>}
-                            {(j.salaryMin || j.salaryMax) && (
-                              <span style={{ fontFamily: "var(--font-mono)" }}>
-                                {j.ccy} {j.salaryMin?.toLocaleString() ?? "?"}–{j.salaryMax?.toLocaleString() ?? "?"}
-                              </span>
-                            )}
-                          </div>
-                        </Link>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            )}
+            {/* Inline jobs list removed — clicking 工作機會 (N) now opens
+                CompanyJobsModal which has paginated scoring + lock UX. */}
           </td>
         </tr>
       )}

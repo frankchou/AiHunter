@@ -78,6 +78,8 @@ model User {
   coverLetterTailors CoverLetterTailor[]
   cancellationFeedback CancellationFeedback[]
   resumeChats     ResumeChat[]
+  jobScores       JobScore[]
+  companyUnlockUsage CompanyUnlockUsage[]
 }
 
 model Resume {
@@ -144,9 +146,11 @@ model Job {
   insights        Insight[]
   resumeTailors   ResumeTailor[]
   coverLetterTailors CoverLetterTailor[]
+  jobScores       JobScore[]
 
   @@index([country, industry, remote])
   @@index([crawledAt])
+  @@index([company])
 }
 
 model SavedJob {
@@ -294,4 +298,39 @@ model CancellationFeedback {
 
   @@index([userId])
   @@index([createdAt])
+}
+
+// Per-user-per-job AI match score for Top 20 company modal.
+// Persistent: once scored, stored forever unless user re-uploads resume
+// (parsedHash mismatch) or manually re-calculates. Independent from
+// `Job.score` which is the JobFeed-context generic score.
+model JobScore {
+  id         String   @id @default(cuid())
+  userId     String
+  jobId      String
+  parsedHash String   // resume.parsedHash at scoring time — staleness probe
+  score      Float    // 0..1
+  reasons    String[]
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  job        Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, jobId])
+  @@index([userId])
+}
+
+// Pro plan monthly free-unlock allowance per company. Free uses ad tickets
+// (see User.adTickets); Max is unlimited. Pro is the only tier needing this
+// counter — first 2 pages/company/month free, beyond that user must wait
+// until next month or upgrade to Max.
+model CompanyUnlockUsage {
+  id            String   @id @default(cuid())
+  userId        String
+  company       String
+  month         String   // "YYYY-MM" (UTC), e.g. "2026-05"
+  pagesUnlocked Int      @default(0)
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, company, month])
+  @@index([userId, month])
 }

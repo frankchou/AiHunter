@@ -41,7 +41,8 @@ AiHunter/
 │   │   │   └── versions/        # 履歷與 CV 版本夾合併清單（GET，Max only）
 │   │   ├── cover-letter/        # A CV 儲存/讀取（GET/POST，全 plan）
 │   │   │   └── draft/           # AI 起草/建議（POST，消耗 analysis 配額）
-│   │   ├── industries/        # 產業 Top 20（GET，支援 ?refresh=1）
+│   │   ├── industries/        # 產業 Top 20（GET，?refresh=1 時也 probe Adzuna jobCount）
+│   │   ├── companies/[name]/jobs/ # Top 20 modal：GET 撈頁 / POST 解鎖或重新計算（per-user）
 │   │   ├── financials/        # 公司最近一季財報（GET，Yahoo Finance + 24h cache）
 │   │   ├── stocks/            # 即時股價（GET，5 分鐘快取）
 │   │   ├── ads/
@@ -72,7 +73,8 @@ AiHunter/
 │   │   ├── ResumeView.tsx     # 履歷 + CV 編寫 + 偏好設定（A 履歷與 A CV 編輯）
 │   │   └── VersionFolderView.tsx # 履歷+CV 版本夾頁面（Max only，分兩區塊）
 │   ├── industry/
-│   │   └── IndustryView.tsx   # 產業排行 + 股價
+│   │   ├── IndustryView.tsx          # 產業排行 + 股價 + 工作機會 (N) badge
+│   │   └── CompanyJobsModal.tsx      # 點 badge 開的 Fancybox 風格 modal（分頁 + 解鎖 + 重新計算）
 │   ├── cocreate/
 │   │   ├── CoCreateButton.tsx # 右下浮動按鈕（Max-only）
 │   │   └── CoCreatePanel.tsx  # 共創對話面板（桌機側拉 / 手機全螢幕 sheet）
@@ -204,6 +206,38 @@ model CoverLetterTailor {
 }
 ```
 
+### JobScore（Top 20 modal 的 per-user-job 評分快取，新增）
+
+```prisma
+model JobScore {
+  id         String   # cuid
+  userId     String
+  jobId      String
+  parsedHash String   # 評分當下的履歷指紋（履歷有新版本 → 此分數視為過期）
+  score      Float    # 0..1
+  reasons    String[]
+  createdAt  DateTime
+  @@unique([userId, jobId])
+}
+```
+
+> 跟 `Job.score`（職缺流用、generic）完全獨立。一筆 (user, job) 永久存在，除非 user 重傳履歷 → parsedHash 不符 → UI 顯 🔒 + 「請重新計算」。
+
+### CompanyUnlockUsage（Pro 月度免費解鎖配額，新增）
+
+```prisma
+model CompanyUnlockUsage {
+  id            String   # cuid
+  userId        String
+  company       String   # 公司名（與 Job.company 比對用）
+  month         String   # "YYYY-MM"（UTC）
+  pagesUnlocked Int      # 該月該公司已解鎖頁數
+  @@unique([userId, company, month])
+}
+```
+
+> Pro 用戶每月每家公司前 2 頁免費；超過 → 拒絕（不接受券支付）→ 升 Max 或等下月。Free 不需此表（用 ticket）。Max 不需此表（無限）。
+
 ### FinancialsCache（公司財報 24h 快取）
 
 ```prisma
@@ -311,6 +345,46 @@ POST /api/ads/unlock
     └─ adUnlocksUsed += 1
     ↓
 onComplete() → 自動重試原 AI 功能
+```
+
+### Top 20 公司職缺評分流程（新）
+
+```
+[使用者點「強制更新」]（3 張券 / Pro+Max 免費）
+/api/industries?refresh=1
+  ├─ AI 生成 Top 20 公司清單
+  ├─ 並行：對每間公司 probeCompanyJobCount(name, regionCountries)
+  │     └─ Adzuna 回 `count`（1 query/國家，超輕量）
+  └─ 寫入 IndustryCache：data.companies[i].jobCount = N
+
+[平常瀏覽產業頁]
+/api/industries?industry=ai
+  └─ 讀 IndustryCache → 直接回傳含 jobCount → UI 顯示「工作機會 (N)」
+
+[點 (N) → 開 CompanyJobsModal]
+  └─ GET /api/companies/[name]/jobs?page=1
+       ├─ 撈 Job 表該公司 page 1（10 筆）
+       ├─ 若 page 1 為空 → 即時 Adzuna fetch + upsert Job 表
+       ├─ JOIN JobScore[userId, jobId]
+       │   ├─ 找到且 parsedHash 一致 → 帶分數
+       │   └─ 找不到 / hash 不符 → locked: true
+       └─ 回傳 jobs + pagination + policy
+
+[使用者按「解鎖此頁分數」]
+  └─ POST /api/companies/[name]/jobs { page: 1 }
+       ├─ consumeCompanyScoring(userId, companyName)
+       │   ├─ Free: 扣 1 ticket
+       │   ├─ Pro:  查 CompanyUnlockUsage 此月此公司 < 2 → 允許 + increment
+       │   │       否則回 PRO_QUOTA_EXCEEDED
+       │   └─ Max:  直接允許
+       ├─ 平行 scoreJob(j, resume, prefs) × 10
+       └─ upsert JobScore × 10（帶當下 parsedHash）
+
+[使用者按「重新計算」]（Pro/Max 才看得到）
+  └─ POST /api/companies/[name]/jobs { page: 1, recalculate: true }
+       ├─ 驗證 hash：若 JobScore.parsedHash 全等於目前 Resume.parsedHash
+       │   → 拒絕 HASH_UNCHANGED（toast：「履歷沒有新版本」）
+       └─ 否則：同上 unlock 流程（Pro 一樣消耗月度配額）
 ```
 
 ### 履歷與 CV 版本管理流程（Max only 進入版本夾與 B 文件）
