@@ -95,28 +95,44 @@ export function canonicalCompanyName(name: string): string {
 // `what_phrase=`, post-filter is too aggressive — we'd show "10" when
 // Adzuna can give us hundreds (just spread across pages). The user wants
 // to be able to drill in.
+// Adzuna's `what_phrase` returns jobs that MENTION the company anywhere
+// (title/description). For employers like OpenAI / Anthropic that aren't in
+// Adzuna's strict company index, the raw count is wildly inflated — we'd
+// claim 8979 jobs at OpenAI but the modal would render 0 (because the
+// display_name on those rows isn't OpenAI). Filter the result set down to
+// rows where the display_name actually contains the company name, and use
+// THAT count for the badge. The modal applies the same filter, so the
+// numbers match.
+const PHRASE_SAMPLE_SIZE = 50;
+
+function matchesDisplayName(j: AdzunaApiJob, companyName: string): boolean {
+  const dn = j.company?.display_name;
+  if (!dn) return false;
+  return dn.toLowerCase().includes(companyName.toLowerCase());
+}
+
 async function adzunaCountOne(country: string, companyName: string, k: { appId: string; appKey: string }): Promise<number> {
   const base = `https://api.adzuna.com/v1/api/jobs/${country}/search/1`;
-  const common = { app_id: k.appId, app_key: k.appKey, results_per_page: 1 };
-  // Try strict company filter first. ANY error (400/404/timeout/429/5xx)
-  // should fall through to the phrase fallback — the previous "only 400/404
-  // counts as recoverable" guard silently zeroed out OpenAI etc. whenever
-  // the strict request hit a transient timeout or rate-limit.
+  // Strict path: Adzuna's company index is authoritative — use its count as-is.
   try {
     const { data } = await axios.get<AdzunaSearchResponse>(base, {
-      params: { ...common, company: companyName },
+      params: { app_id: k.appId, app_key: k.appKey, results_per_page: 1, company: companyName },
       timeout: 10_000,
     });
     return data.count ?? 0;
   } catch {
-    /* fall through to fallback below */
+    /* fall through to phrase fallback */
   }
+  // Phrase fallback: pull a sample and count rows that actually match this
+  // employer's display_name. Returns a lower bound (only first 50 results
+  // by relevance) but it's the same lower bound the modal will display, so
+  // badge stays consistent with list.
   try {
     const { data } = await axios.get<AdzunaSearchResponse>(base, {
-      params: { ...common, what_phrase: companyName },
-      timeout: 10_000,
+      params: { app_id: k.appId, app_key: k.appKey, results_per_page: PHRASE_SAMPLE_SIZE, what_phrase: companyName },
+      timeout: 12_000,
     });
-    return data.count ?? 0;
+    return (data.results ?? []).filter((j) => matchesDisplayName(j, companyName)).length;
   } catch {
     return 0;
   }
@@ -163,9 +179,7 @@ async function adzunaFetchCountry(
   // page 2/3/… end up mostly duplicates of page 1.
   const common = { app_id: k.appId, app_key: k.appKey, results_per_page: perPage, sort_by: "date" };
 
-  // Same recovery shape as adzunaCountOne — fall through to phrase fallback
-  // on any error, not just 400/404. Avoids silent empty pages on transient
-  // timeouts / rate-limits.
+  // Strict path: trust Adzuna's company-indexed results as-is.
   try {
     const { data } = await axios.get<AdzunaSearchResponse>(url, {
       params: { ...common, company: companyName },
@@ -173,14 +187,18 @@ async function adzunaFetchCountry(
     });
     return data.results ?? [];
   } catch {
-    /* fall through to fallback below */
+    /* fall through to phrase fallback */
   }
+  // Phrase fallback: same display_name post-filter as adzunaCountOne so the
+  // badge and the rendered list agree on which rows count as "at this
+  // employer". Without this, badge would say 8979 but the modal would see
+  // 0 (false-positive jobs that just mention the employer in JD).
   try {
     const { data } = await axios.get<AdzunaSearchResponse>(url, {
       params: { ...common, what_phrase: companyName },
       timeout: 12_000,
     });
-    return data.results ?? [];
+    return (data.results ?? []).filter((j) => matchesDisplayName(j, companyName));
   } catch {
     return [];
   }

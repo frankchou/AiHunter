@@ -293,6 +293,10 @@ export async function GET(req: NextRequest, { params }: { params: { name: string
       pageSize:       PAGE_SIZE,
       currentParsedHash,
       canRecalculate: tier !== "free",          // only paid plans see the button
+      // Pro/Max with no parsed resume → auto-score silently no-ops and all
+      // rows render locked. Surface this so the modal can prompt instead of
+      // showing a generic lock badge.
+      needsResume:    tier !== "free" && !currentParsedHash,
     },
   });
 }

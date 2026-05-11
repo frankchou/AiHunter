@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "crypto";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -36,11 +37,21 @@ export async function POST(req: NextRequest) {
       orderBy: { version: "desc" },
     });
 
+    // parsedHash must be set at upload time — downstream features
+    // (Top 20 auto-score, analyze cache invalidation) gate on this value
+    // being non-null. Previously it was only written when the user explicitly
+    // ran AI analysis, which silently broke auto-score for Max/Pro users
+    // who hadn't run analysis yet.
+    const parsedHash = createHash("md5")
+      .update(JSON.stringify(parsed))
+      .digest("hex");
+
     const resume = await prisma.resume.create({
       data: {
         userId: session.user.id,
         rawText,
         parsed,
+        parsedHash,
         fileName: fileName ?? null,
         fileData: fileData ?? null,
         fileMime: fileMime ?? null,

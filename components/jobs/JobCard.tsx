@@ -12,17 +12,41 @@ interface Props {
   // When true, ScorePill shows 🔒 instead of "— 分" pending state.
   locked?: boolean;
   staleScore?: boolean;  // true if score exists but resume has changed since
+  // When provided, the locked pill becomes a button that calls this — surfaces
+  // the unlock/ad-watch flow without forcing users to find a separate CTA.
+  onLockClick?: () => void;
 }
 
-function ScorePill({ score, locked, staleScore }: { score: number | null; locked?: boolean; staleScore?: boolean }) {
+function ScorePill({ score, locked, staleScore, onLockClick }: { score: number | null; locked?: boolean; staleScore?: boolean; onLockClick?: () => void }) {
   if (locked) {
+    const label = "🔒 鎖定";
+    const title = staleScore ? "履歷已更新，請重新計算分數" : "點擊解鎖此頁分數";
+    if (onLockClick) {
+      return (
+        <button
+          type="button"
+          onClick={onLockClick}
+          className="score-pill pending"
+          title={title}
+          style={{
+            background: "var(--bg-soft)",
+            color: "var(--ink-2)",
+            border: "1px dashed var(--line)",
+            cursor: "pointer",
+            fontFamily: "inherit",
+          }}
+        >
+          {label}
+        </button>
+      );
+    }
     return (
       <span
         className="score-pill pending"
         title={staleScore ? "履歷已更新，請重新計算分數" : "尚未解鎖分數"}
         style={{ background: "var(--bg-soft)", color: "var(--ink-3)", border: "1px dashed var(--line)" }}
       >
-        🔒 鎖定
+        {label}
       </span>
     );
   }
@@ -32,7 +56,7 @@ function ScorePill({ score, locked, staleScore }: { score: number | null; locked
   return <span className={`score-pill ${cls}`} title="AI 推薦適合度">{pct} 分</span>;
 }
 
-export function JobCard({ job, saved, onSave, locked, staleScore }: Props) {
+export function JobCard({ job, saved, onSave, locked, staleScore, onLockClick }: Props) {
   const cultureTags = extractCultureTags(job.description ?? "");
 
   return (
@@ -64,7 +88,7 @@ export function JobCard({ job, saved, onSave, locked, staleScore }: Props) {
         )}
       </div>
       <div className="job-side">
-        <ScorePill score={job.score ?? null} locked={locked} staleScore={staleScore} />
+        <ScorePill score={job.score ?? null} locked={locked} staleScore={staleScore} onLockClick={onLockClick} />
         <button className={`btn star${saved ? " on" : ""}`} onClick={onSave}>
           {saved ? "★ 已收藏" : "☆ 收藏"}
         </button>
