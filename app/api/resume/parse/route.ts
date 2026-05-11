@@ -8,21 +8,14 @@ export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  const bill = await consumeUsage(session.user.id, "analysis");
-  if (!bill.ok) {
-    return NextResponse.json({
-      error: "LIMIT_REACHED",
-      planTier: bill.planTier,
-      tickets: bill.tickets,
-      adSessionsLeft: bill.adSessionsLeft,
-    }, { status: 402 });
-  }
-
+  // ── 1. Extract file / text BEFORE charging ──────────────────────────────
+  // If the request is malformed or the file is empty, we don't want to
+  // burn the user's ticket for nothing.
   const contentType = req.headers.get("content-type") ?? "";
 
   let rawText = "";
   let fileName: string | null = null;
-  let fileData: string | null = null; // base64
+  let fileData: string | null = null;
   let fileMime: string | null = null;
 
   if (contentType.includes("application/json")) {
@@ -56,13 +49,24 @@ export async function POST(req: NextRequest) {
       }
     } else {
       rawText = buffer.toString("utf-8");
-      fileData = null; // plain text — rawText is enough
+      fileData = null;
     }
   } else {
     return NextResponse.json({ error: "Unsupported content-type" }, { status: 400 });
   }
 
   if (!rawText.trim()) return NextResponse.json({ error: "Empty content" }, { status: 400 });
+
+  // ── 2. Now charge — we have valid input to actually process ─────────────
+  const bill = await consumeUsage(session.user.id, "analysis");
+  if (!bill.ok) {
+    return NextResponse.json({
+      error: "LIMIT_REACHED",
+      planTier: bill.planTier,
+      tickets: bill.tickets,
+      adSessionsLeft: bill.adSessionsLeft,
+    }, { status: 402 });
+  }
 
   try {
     const parsed = await parseResumeText(rawText);

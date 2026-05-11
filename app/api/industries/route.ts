@@ -86,19 +86,38 @@ export async function GET(req: NextRequest) {
     type Payload = { companies: RawCompany[] };
     let payload: Payload | undefined;
     let cached = false;
+    let stale   = false;
 
-    if (!forceRefresh) {
-      const row = await prisma.industryCache.findUnique({ where: { industry } });
-      if (row) {
-        const ageMs = Date.now() - row.updatedAt.getTime();
-        if (ageMs < CACHE_TTL_DAYS * 24 * 60 * 60 * 1000) {
-          payload = row.data as unknown as Payload;
-          cached = true;
-        }
+    // Always read from cache first — both forceRefresh and normal browse
+    // benefit from knowing whether there's existing data and its age.
+    const existing = await prisma.industryCache.findUnique({ where: { industry } });
+    if (existing) {
+      const ageMs = Date.now() - existing.updatedAt.getTime();
+      const fresh = ageMs < CACHE_TTL_DAYS * 24 * 60 * 60 * 1000;
+      if (!forceRefresh) {
+        // Normal browse: return whatever's there (fresh or stale).
+        // We DO NOT auto-generate on a missing/stale cache — generation
+        // costs AI tokens + ~80 Adzuna queries and would let free users
+        // bypass the billing mechanism just by reloading the page.
+        payload = existing.data as unknown as Payload;
+        cached  = true;
+        stale   = !fresh;
       }
     }
 
-    if (!payload) {
+    if (!forceRefresh && !payload) {
+      // Cache entirely empty AND no refresh requested → empty state,
+      // UI shows "點重新獲取生成資料" CTA.
+      return NextResponse.json({
+        companies: [],
+        industries: INDUSTRIES,
+        cached: false,
+        stale: false,
+        empty: true,
+      });
+    }
+
+    if (forceRefresh) {
       // ── AI Top 20 generation ───────────────────────────────────────
       payload = (await generateIndustryTop(industry)) as Payload;
 
@@ -162,7 +181,22 @@ export async function GET(req: NextRequest) {
       });
     }
 
-    return NextResponse.json({ companies: payload.companies, industries: INDUSTRIES, cached });
+    if (!payload) {
+      return NextResponse.json({
+        companies: [],
+        industries: INDUSTRIES,
+        cached: false,
+        stale: false,
+        empty: true,
+      });
+    }
+    return NextResponse.json({
+      companies: payload.companies,
+      industries: INDUSTRIES,
+      cached,
+      stale,
+      empty: false,
+    });
   } catch (e) {
     console.error("[industries]", e);
     return NextResponse.json({ companies: [], industries: INDUSTRIES, error: String(e) });

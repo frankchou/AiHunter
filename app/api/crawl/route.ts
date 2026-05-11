@@ -3,23 +3,50 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { crawlJobs } from "@/lib/job-sources";
+import { consumeUsage } from "@/lib/billing";
 import type { ParsedResume, JobPreference } from "@/lib/types";
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-  try {
-    const resume = await prisma.resume.findFirst({
-      where: { userId: session.user.id, isActive: true },
-      orderBy: { createdAt: "desc" },
-    });
+  // ── Billing gate ──────────────────────────────────────────────────────
+  // Crawl triggers Adzuna + other source queries AND batchScoreJobs (up to
+  // 25 AI calls). Without this gate, free users could spam 「更新職缺」
+  // and rack up unlimited AI cost.
+  //
+  // Exception: a brand-new user with no prior jobs whatsoever in the
+  // system gets one free auto-crawl as onboarding (so they see SOME
+  // content on first /feed visit).
+  const resume = await prisma.resume.findFirst({
+    where: { userId: session.user.id, isActive: true },
+    orderBy: { createdAt: "desc" },
+  });
+  if (!resume) {
+    return NextResponse.json({ error: "需要先上傳履歷才能抓取職缺" }, { status: 400 });
+  }
 
+  const userJobCount = await prisma.job.count();
+  const isOnboarding = userJobCount === 0; // empty DB → first-ever crawl, free
+
+  if (!isOnboarding) {
+    const bill = await consumeUsage(session.user.id, "analysis");
+    if (!bill.ok) {
+      return NextResponse.json({
+        error: "LIMIT_REACHED",
+        planTier: bill.planTier,
+        tickets: bill.tickets,
+        adSessionsLeft: bill.adSessionsLeft,
+        message: "更新職缺需要 1 張解析券（與履歷解析共用配額）",
+      }, { status: 402 });
+    }
+  }
+
+  try {
     const prefs = await prisma.preference.findUnique({ where: { userId: session.user.id } });
 
-    const parsedResume: ParsedResume = resume
-      ? (resume.parsed as unknown as ParsedResume)
-      : { name: session.user.name ?? "User", headline: "Professional", skills: [], experience: [] };
+    // `resume` already loaded above for the billing gate
+    const parsedResume: ParsedResume = resume.parsed as unknown as ParsedResume;
 
     const jobPrefs: JobPreference = prefs
       ? {

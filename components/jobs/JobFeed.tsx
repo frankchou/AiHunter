@@ -20,6 +20,7 @@ export function JobFeed({ initialPrefs }: Props) {
   const [showFilters, setShowFilters] = useState(false);
   const [q, setQ] = useState("");
   const [crawling, setCrawling] = useState(false);
+  const [crawlLimit, setCrawlLimit] = useState<{ planTier: string; tickets: number; adSessionsLeft: number; message?: string } | null>(null);
 
   // Shared SWR key with SavedBoard for bidirectional sync
   const { data: savedList, mutate: mutateSaved } = useSWR<{ jobId: string }[]>(
@@ -83,8 +84,18 @@ export function JobFeed({ initialPrefs }: Props) {
 
   const handleCrawl = async () => {
     setCrawling(true);
+    setCrawlLimit(null);
     try {
-      await fetch("/api/crawl", { method: "POST" });
+      const res = await fetch("/api/crawl", { method: "POST" });
+      if (res.status === 402) {
+        setCrawlLimit(await res.json());
+        return;
+      }
+      if (res.status === 400) {
+        const data = await res.json();
+        alert(data.error ?? "更新失敗");
+        return;
+      }
       await mutate();
     } finally {
       setCrawling(false);

@@ -183,6 +183,32 @@ STRIPE_MAX_PRICE_ID=price_...
 
 ---
 
+### 計費執行守則（不可被重整頁面繞過）
+
+所有 AI 操作必須走 `consumeUsage` 或對應的 plan 門控（`ensureMaxOrSuper`、`ensureCoCreateAccess`、`consumeCompanyScoring`）才可執行。**任何 endpoint 只要會打 Claude / Adzuna AI 推理，就必須先過 gate**。
+
+| Endpoint | 何時收費 | 行動 / Plan 限制 |
+|----------|---------|----------------|
+| POST `/api/industries?refresh=1` | 顯式 `refresh=1` | `industryRefresh`（3 張券；Pro/Max 免費） |
+| GET `/api/industries`（無 refresh） | 永遠不收費 | 只讀 IndustryCache；無 cache → 回 empty + needsRefresh，**不會 generate** |
+| POST `/api/jobs/[id]/insights` | 每次呼叫 | `insight`（Free 3、Pro 30、Max ∞）；GET 永遠免費讀 |
+| POST `/api/resume/parse` | 每次成功上傳 | `analysis`；先驗證 rawText 有內容才扣 |
+| POST `/api/resume/analyze` | 內容 hash 不同才收費 | `analysis`；同 hash → 直接回 cache，不收 |
+| POST `/api/cover-letter/draft` | 每次 AI 起草 | `analysis`；先驗證 user 有履歷才扣 |
+| POST `/api/crawl` | **每次更新職缺**（除了首次 onboarding） | `analysis`；Job 表為空時免費（onboarding 首抓） |
+| POST `/api/jobs/[id]/cv` (B 履歷) | Max only | `ensureMaxOrSuper` 403 擋住非 Max |
+| POST `/api/jobs/[id]/cover-letter` (B CV) | Max only | 同上 |
+| POST `/api/chat/threads/*/message` | Max only | `ensureCoCreateAccess` 403 |
+| GET `/api/companies/[name]/jobs` | Max/Pro 自動評分；Free 不評分 | `consumeCompanyScoring`（Free 1 張券/頁；Pro 月度 2/公司；Max ∞） |
+| POST `/api/companies/[name]/jobs` | 明確 unlock / recalculate | 同上 |
+
+**已驗證沒有 bypass 的設計：**
+- 重整頁面不會重跑 AI（讀 cache）
+- 第一次入口的 onboarding 例外都有條件（履歷必填、Job 表為空等）
+- 「免費先扣再做」的順序錯誤已修（先驗證輸入再 `consumeUsage`）
+
+---
+
 ### 公司最近一季財報（產業 Top 20）
 
 展開公司行後顯示：
