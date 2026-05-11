@@ -15,6 +15,11 @@ interface Props {
   // When provided, the locked pill becomes a button that calls this — surfaces
   // the unlock/ad-watch flow without forcing users to find a separate CTA.
   onLockClick?: () => void;
+  // Label shown before matchReasons. Default "AI 推薦" reads as a positive
+  // suggestion (job feed context). Top 20 modal passes "AI 解析" because
+  // there the same reasons explain WHY a (possibly low) score was assigned,
+  // not a recommendation.
+  reasonsLabel?: string;
 }
 
 function ScorePill({ score, locked, staleScore, onLockClick }: { score: number | null; locked?: boolean; staleScore?: boolean; onLockClick?: () => void }) {
@@ -56,7 +61,7 @@ function ScorePill({ score, locked, staleScore, onLockClick }: { score: number |
   return <span className={`score-pill ${cls}`} title="AI 推薦適合度">{pct} 分</span>;
 }
 
-export function JobCard({ job, saved, onSave, locked, staleScore, onLockClick }: Props) {
+export function JobCard({ job, saved, onSave, locked, staleScore, onLockClick, reasonsLabel = "AI 推薦" }: Props) {
   const cultureTags = extractCultureTags(job.description ?? "");
 
   return (
@@ -75,7 +80,7 @@ export function JobCard({ job, saved, onSave, locked, staleScore, onLockClick }:
           <span>🕐 {relativeTime(job.postedAt ?? null)}</span>
         </div>
         {job.matchReasons.length > 0 && (
-          <div className="match-reasons">AI 推薦: {job.matchReasons.slice(0, 2).join(" · ")}</div>
+          <div className="match-reasons">{reasonsLabel}: {job.matchReasons.slice(0, 2).join(" · ")}</div>
         )}
         <div className="job-tags">
           {job.skills.slice(0, 5).map((s) => <span key={s} className="tag">{s}</span>)}

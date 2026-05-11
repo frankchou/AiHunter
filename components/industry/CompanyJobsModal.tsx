@@ -382,6 +382,7 @@ export function CompanyJobsModal({
                   locked={j.locked}
                   staleScore={j.staleScore}
                   onLockClick={j.locked ? handleLockClick : undefined}
+                  reasonsLabel="AI 解析"
                 />
               ))}
             </div>

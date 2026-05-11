@@ -5,6 +5,11 @@ import { hashUrl } from "@/lib/utils";
 // parallel calls returns 429 on ~16 of them. All Adzuna API traffic in
 // this module flows through this single limiter so background refreshes
 // (which can otherwise dispatch 120+ concurrent calls) play nice.
+//
+// Also wraps automatic retry on transient 429/503 — without retry, a
+// single throttled request would cache jobCount=0 for that company until
+// the next manual refresh (which is exactly the "Microsoft (0) in AI but
+// (1119) in SaaS" bug).
 const adzunaLimit = (() => {
   const CONCURRENCY = 4;
   let active = 0;
@@ -15,7 +20,25 @@ const adzunaLimit = (() => {
     }
     active++;
     try {
-      return await fn();
+      // Retry on 429 / 503 with exponential backoff. Adzuna's throttle is
+      // short-lived (seconds), so 3 attempts with 0.5/1/2s waits is plenty.
+      // Other errors (400, network) propagate immediately — callers handle
+      // 400 by falling back to what_phrase, etc.
+      const backoffs = [500, 1000, 2000];
+      let lastErr: unknown = null;
+      for (let attempt = 0; attempt <= backoffs.length; attempt++) {
+        try {
+          return await fn();
+        } catch (err) {
+          const status = (err as { response?: { status?: number } })?.response?.status;
+          if (status !== 429 && status !== 503) throw err;
+          lastErr = err;
+          if (attempt < backoffs.length) {
+            await new Promise((r) => setTimeout(r, backoffs[attempt]));
+          }
+        }
+      }
+      throw lastErr;
     } finally {
       active--;
       const next = queue.shift();
