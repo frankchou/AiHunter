@@ -177,25 +177,27 @@ async function adzunaFetchCountry(
   // sort_by=date gives stable pagination — without it Adzuna returns by
   // "relevance" which causes the top jobs to bleed across many pages so
   // page 2/3/… end up mostly duplicates of page 1.
-  const common = { app_id: k.appId, app_key: k.appKey, results_per_page: perPage, sort_by: "date" };
 
   // Strict path: trust Adzuna's company-indexed results as-is.
   try {
     const { data } = await axios.get<AdzunaSearchResponse>(url, {
-      params: { ...common, company: companyName },
+      params: { app_id: k.appId, app_key: k.appKey, results_per_page: perPage, sort_by: "date", company: companyName },
       timeout: 12_000,
     });
     return data.results ?? [];
   } catch {
     /* fall through to phrase fallback */
   }
-  // Phrase fallback: same display_name post-filter as adzunaCountOne so the
-  // badge and the rendered list agree on which rows count as "at this
-  // employer". Without this, badge would say 8979 but the modal would see
-  // 0 (false-positive jobs that just mention the employer in JD).
+  // Phrase fallback: post-filter by display_name. The post-filter yields a
+  // RARE subset of the raw what_phrase results (often <10% match), so we
+  // MUST oversample — using the caller's perPage (typically 10) often
+  // returns zero matches even when matches exist deeper in the page. Pull
+  // PHRASE_SAMPLE_SIZE per country, filter, then let the caller slice.
+  // This is also what adzunaCountOne uses, so badge count and the
+  // fetched rows come from the same sample.
   try {
     const { data } = await axios.get<AdzunaSearchResponse>(url, {
-      params: { ...common, what_phrase: companyName },
+      params: { app_id: k.appId, app_key: k.appKey, results_per_page: PHRASE_SAMPLE_SIZE, sort_by: "date", what_phrase: companyName },
       timeout: 12_000,
     });
     return (data.results ?? []).filter((j) => matchesDisplayName(j, companyName));
