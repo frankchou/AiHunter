@@ -42,6 +42,30 @@ export function CompanyJobsModal({
   const [prompt, setPrompt] = useState<null | "unlock_confirm" | "pro_quota_exceeded" | "hash_unchanged">(null);
   const [promptData, setPromptData] = useState<{ resetAt?: string; tickets?: number }>({});
   const [showAdWatcher, setShowAdWatcher] = useState(false);
+  const [upgrading, setUpgrading] = useState(false);
+
+  // Immediate Pro→Max upgrade with prorated billing. Used by the
+  // pro_quota_exceeded prompt so a Pro user blocked by monthly quota can
+  // unlock now (pays the prorated difference, full Max price next cycle).
+  const upgradeToMaxNow = async () => {
+    if (upgrading) return;
+    setUpgrading(true);
+    try {
+      const r = await fetch("/api/stripe/upgrade-now", { method: "POST" });
+      const json = await r.json().catch(() => ({}));
+      if (!r.ok) {
+        alert(json.message ?? json.error ?? "升級失敗，請稍後再試或前往設定頁手動升級");
+        return;
+      }
+      setPrompt(null);
+      // Refetch everything that depends on tier: the modal's policy + the
+      // global profile (which gates auto-fetch decisions elsewhere).
+      mutate();
+      globalMutate("/api/user/profile");
+    } finally {
+      setUpgrading(false);
+    }
+  };
 
   // Unique token per modal mount → forces SWR to make a fresh request each
   // time the modal opens, avoiding the "stale 1 row first, then 9 more"
@@ -253,8 +277,11 @@ export function CompanyJobsModal({
           <PromptBanner
             kind="warn"
             title="本月免費額度已用完"
-            body={`Pro 用戶每月每家公司前 2 頁分數免費。下次重置：${promptData.resetAt ?? "下月初"}。升級 Max 將按比例補本月差價、立即生效（即將開放，目前請於下月生效後使用）。`}
-            primary={{ label: "🚀 升級 Max", href: "/pricing" }}
+            body={`Pro 用戶每月每家公司前 2 頁分數免費。下次重置：${promptData.resetAt ?? "下月初"}。升級 Max 會按比例計收本月差價、立即生效、下月起按 Max 月費續扣。`}
+            primary={{
+              label: upgrading ? "升級中…" : "🚀 立即升級 Max（按比例補差價）",
+              onClick: upgradeToMaxNow,
+            }}
             secondary={{ label: "等下個月", onClick: () => setPrompt(null) }}
           />
         )}

@@ -122,11 +122,19 @@ consumeUsage(userId, action) — lib/billing.ts
 
 ### 升級流程
 
+**新訂閱（Free → Pro / Max）**：
 1. 用戶點擊「升級方案」→ POST /api/stripe/checkout
 2. 建立或取用既有 Stripe Customer（以 `stripeCustomerId` 關聯）
 3. 建立 Checkout Session（subscription 模式），metadata 帶入 `userId + tier`
 4. 跳轉 Stripe 付款頁
 5. 付款完成 → Webhook `checkout.session.completed` → 更新 `planTier`
+
+**Pro → Max 立即升級（按比例補差價）**：
+- POST `/api/stripe/upgrade-now` 用 `stripe.subscriptions.update` 把現有 subscription 的 item 改成 Max price
+- 使用 `proration_behavior: "always_invoice"` → Stripe 計算本期剩餘的差價、開立並立即收款
+- DB 端立即 `planTier = "max"`、清除任何 pending downgrade schedule
+- 下個 billing cycle 自動以 Max 全價續扣
+- 觸發場景：Top 20 modal 中 Pro 用戶本月配額用完後在 `pro_quota_exceeded` prompt 點「立即升級 Max」
 
 ### Webhook 事件處理
 
