@@ -71,6 +71,19 @@ function getKey() {
   return { appId, appKey };
 }
 
+// AI Top 20 sometimes returns composite names like "Google/Alphabet" or
+// "Meta (Facebook)". Adzuna doesn't index those as one company — querying
+// with the composite string returns near-zero (and stored Job rows then
+// have display_name = "Google", not the composite, so DB `contains` lookups
+// also miss). Resolve to the first reasonable segment for any I/O against
+// Adzuna and the Job table.
+export function canonicalCompanyName(name: string): string {
+  for (const part of name.split(/[/()]/).map((s) => s.trim())) {
+    if (part.length >= 2) return part;
+  }
+  return name.trim();
+}
+
 // Returns Adzuna's `count` (sum across countries) — the same number the
 // modal will use for pagination. Trust the search engine: if Adzuna says
 // 8980 results are relevant to "OpenAI", the modal paginates through all
@@ -85,18 +98,19 @@ function getKey() {
 async function adzunaCountOne(country: string, companyName: string, k: { appId: string; appKey: string }): Promise<number> {
   const base = `https://api.adzuna.com/v1/api/jobs/${country}/search/1`;
   const common = { app_id: k.appId, app_key: k.appKey, results_per_page: 1 };
-  // Try strict company filter first
+  // Try strict company filter first. ANY error (400/404/timeout/429/5xx)
+  // should fall through to the phrase fallback — the previous "only 400/404
+  // counts as recoverable" guard silently zeroed out OpenAI etc. whenever
+  // the strict request hit a transient timeout or rate-limit.
   try {
     const { data } = await axios.get<AdzunaSearchResponse>(base, {
       params: { ...common, company: companyName },
       timeout: 10_000,
     });
     return data.count ?? 0;
-  } catch (err) {
-    const status = (err as { response?: { status?: number } })?.response?.status;
-    if (status !== 400 && status !== 404) return 0;
+  } catch {
+    /* fall through to fallback below */
   }
-  // Fallback: phrase search
   try {
     const { data } = await axios.get<AdzunaSearchResponse>(base, {
       params: { ...common, what_phrase: companyName },
@@ -111,7 +125,8 @@ async function adzunaCountOne(country: string, companyName: string, k: { appId: 
 export async function probeCompanyJobCount(companyName: string, countries: string[]): Promise<number> {
   const k = getKey();
   if (!k || !companyName.trim()) return 0;
-  const counts = await Promise.all(countries.map((c) => adzunaCountOne(c, companyName, k)));
+  const lookup = canonicalCompanyName(companyName);
+  const counts = await Promise.all(countries.map((c) => adzunaCountOne(c, lookup, k)));
   return counts.reduce((a, b) => a + b, 0);
 }
 
@@ -148,17 +163,18 @@ async function adzunaFetchCountry(
   // page 2/3/… end up mostly duplicates of page 1.
   const common = { app_id: k.appId, app_key: k.appKey, results_per_page: perPage, sort_by: "date" };
 
+  // Same recovery shape as adzunaCountOne — fall through to phrase fallback
+  // on any error, not just 400/404. Avoids silent empty pages on transient
+  // timeouts / rate-limits.
   try {
     const { data } = await axios.get<AdzunaSearchResponse>(url, {
       params: { ...common, company: companyName },
       timeout: 12_000,
     });
     return data.results ?? [];
-  } catch (err) {
-    const status = (err as { response?: { status?: number } })?.response?.status;
-    if (status !== 400 && status !== 404) return [];
+  } catch {
+    /* fall through to fallback below */
   }
-
   try {
     const { data } = await axios.get<AdzunaSearchResponse>(url, {
       params: { ...common, what_phrase: companyName },
@@ -183,9 +199,10 @@ export async function fetchCompanyJobsPage(
   // modal page 1 = newest 10×country, page 2 = next 10×country.
   const perCountry = opts.pageSize;
   const collected: AdzunaJobRow[] = [];
+  const lookup = canonicalCompanyName(companyName);
 
   await Promise.all(countries.map(async (country) => {
-    const results = await adzunaFetchCountry(country, companyName, opts.page, perCountry, k);
+    const results = await adzunaFetchCountry(country, lookup, opts.page, perCountry, k);
     for (const j of results) {
       // Note: we trust Adzuna's search relevance — `company=` was strict
       // already, and `what_phrase=` fallback returns whatever Adzuna thinks

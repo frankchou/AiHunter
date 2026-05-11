@@ -5,7 +5,7 @@ import { prisma } from "@/lib/prisma";
 import { consumeCompanyScoring, getProMonthlyUsage } from "@/lib/billing";
 import { COMPANY_SCORING_PAGE_SIZE } from "@/lib/plans";
 import {
-  countriesForRegion, fetchCompanyJobsPage,
+  countriesForRegion, fetchCompanyJobsPage, canonicalCompanyName,
   type AdzunaJobRow,
 } from "@/lib/job-sources/adzuna-company";
 import { scoreJob } from "@/lib/ai/match";
@@ -133,6 +133,10 @@ export async function GET(req: NextRequest, { params }: { params: { name: string
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const companyName = decodeURIComponent(params.name);
+  // AI sometimes gives composite names ("Google/Alphabet"). Adzuna indexes
+  // those segments separately and stored Job rows use the actual brand
+  // (display_name), so we match by canonical segment in DB too.
+  const lookup = canonicalCompanyName(companyName);
   const page = Math.max(1, parseInt(req.nextUrl.searchParams.get("page") ?? "1"));
 
   // 1. Find the user's active resume — we need parsedHash for staleness check
@@ -145,7 +149,7 @@ export async function GET(req: NextRequest, { params }: { params: { name: string
 
   // 2. Try to read this page from cached Job rows first (saves Adzuna queries)
   let jobsFromDb = await prisma.job.findMany({
-    where: { company: { contains: companyName, mode: "insensitive" }, source: "adzuna" },
+    where: { company: { contains: lookup, mode: "insensitive" }, source: "adzuna" },
     orderBy: { postedAt: "desc" },
     skip:    (page - 1) * PAGE_SIZE,
     take:    PAGE_SIZE,
@@ -160,7 +164,7 @@ export async function GET(req: NextRequest, { params }: { params: { name: string
     if (adzunaRows.length) {
       await upsertJobs(adzunaRows);
       jobsFromDb = await prisma.job.findMany({
-        where: { company: { contains: companyName, mode: "insensitive" }, source: "adzuna" },
+        where: { company: { contains: lookup, mode: "insensitive" }, source: "adzuna" },
         orderBy: { postedAt: "desc" },
         skip:    (page - 1) * PAGE_SIZE,
         take:    PAGE_SIZE,
@@ -267,9 +271,12 @@ export async function GET(req: NextRequest, { params }: { params: { name: string
   })();
 
   const dbCount = await prisma.job.count({
-    where: { company: { contains: companyName, mode: "insensitive" }, source: "adzuna" },
+    where: { company: { contains: lookup, mode: "insensitive" }, source: "adzuna" },
   });
-  const total = cacheCount ?? dbCount;
+  // Prefer the larger of the two: if the cache count is stale (e.g. it was
+  // written before the composite-name fix and stored 3 for "Google/Alphabet"
+  // while the new canonical query finds hundreds in DB), trust the DB.
+  const total = Math.max(cacheCount ?? 0, dbCount);
 
   return NextResponse.json({
     jobs,
@@ -301,6 +308,7 @@ export async function POST(req: NextRequest, { params }: { params: { name: strin
   if (!session) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   const companyName = decodeURIComponent(params.name);
+  const lookup = canonicalCompanyName(companyName);
   const body = await req.json().catch(() => ({}));
   const page = Math.max(1, parseInt(body.page ?? "1"));
   const recalculate = !!body.recalculate;
@@ -318,7 +326,7 @@ export async function POST(req: NextRequest, { params }: { params: { name: strin
 
   // 2. Find jobs for this page
   const jobs = await prisma.job.findMany({
-    where: { company: { contains: companyName, mode: "insensitive" }, source: "adzuna" },
+    where: { company: { contains: lookup, mode: "insensitive" }, source: "adzuna" },
     orderBy: { postedAt: "desc" },
     skip:    (page - 1) * PAGE_SIZE,
     take:    PAGE_SIZE,

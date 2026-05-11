@@ -175,6 +175,14 @@ STRIPE_MAX_PRICE_ID=price_...
 
 **取得 jobCount 的時機**：只在「強制更新」產業頁時 probe，存進 IndustryCache（7 天），平常瀏覽 0 額外 API 呼叫。
 
+**公司名規範化（canonicalCompanyName）**：AI 偶爾回傳複合名（如 `Google/Alphabet`、`Meta (Facebook)`）。Adzuna 與 Job 表都以單一品牌名為 key，所以所有對 Adzuna 與 DB 的查詢都會先取主要段（`/` 或 `()` 前的非空首段）。例：
+- 顯示給使用者 / cache name：`Google/Alphabet`（保留 AI 原文）
+- Adzuna 查詢 / Job.company 比對 key：`Google`
+- 強化方案：AI prompt 已禁止複合名，但既有 cache 仍可能含舊資料，所以 modal 端永遠 canonicalize。
+- 修補式總數：`total = max(cacheCount, dbCount)`，避免舊 cache 的小數字蓋掉新查到的大數字。
+
+**Adzuna 錯誤恢復**：`adzunaCountOne` / `adzunaFetchCountry` 對 strict `company=` 查詢的**任何**錯誤（400/404/timeout/429/5xx）都會落到 `what_phrase=` fallback，不再因 status guard 提早回 0（修正 OpenAI 跨次刷新跳 0 的 bug）。
+
 **Modal 內容**：分頁顯示（10 筆/頁），每筆用 JobCard 樣式，與職缺流卡片視覺一致。
 
 #### Per-user 評分（per-page 解鎖）

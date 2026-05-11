@@ -28,7 +28,7 @@ For each company provide honest, actionable info for job seekers. Respond in JSO
   "companies": [
     {
       "rank": 1,
-      "name": "Company Name",
+      "name": "Single canonical brand name as it appears on job listings (e.g. 'Google' not 'Google/Alphabet'; 'Meta' not 'Meta (Facebook)'). Adzuna indexes by brand — composite names break job-count lookups.",
       "ticker": "Yahoo Finance ticker symbol only (no prefix). US stocks: MSFT AAPL NVDA. Taiwan: 2330.TW 2317.TW. Japan: 9984.T 6758.T. Korea: 005930.KS. HK: 0700.HK 9988.HK (always 4 digits with leading zero). EU: SAP.DE ASML.AS. Private companies (OpenAI, Anthropic, ByteDance): null.",
       "region": "US | TW | JP | KR | HK | EU | Global",
       "pros": ["hiring culture pro 1 in zh-TW", "pro 2", "pro 3"],
