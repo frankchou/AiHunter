@@ -120,7 +120,18 @@ export function CompanyJobsModal({
     >
       <div
         onClick={(e) => e.stopPropagation()}
-        style={{ background: "var(--bg-elev)", borderRadius: 12, maxWidth: 860, width: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column" }}
+        style={{
+          background: "var(--bg-elev)",
+          borderRadius: 12,
+          maxWidth: 860,
+          width: "100%",
+          maxHeight: "90vh",
+          display: "flex",
+          flexDirection: "column",
+          // Clip the inner scroll area so the scrollbar can't draw over the
+          // outer rounded corner (was causing the bottom-right to look square).
+          overflow: "hidden",
+        }}
       >
         {/* Header */}
         <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>

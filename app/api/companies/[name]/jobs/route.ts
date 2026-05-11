@@ -151,14 +151,9 @@ export async function GET(req: NextRequest, { params }: { params: { name: string
     take:    PAGE_SIZE,
   });
 
-  // If the page is empty AND we're on page 1, do a fresh Adzuna fetch.
-  // For deeper pages, only fetch if we know there are more (count > skip).
-  const totalCached = await prisma.job.count({
-    where: { company: { contains: companyName, mode: "insensitive" }, source: "adzuna" },
-  });
-
-  const needFresh = jobsFromDb.length < PAGE_SIZE && totalCached <= (page - 1) * PAGE_SIZE + jobsFromDb.length;
-  if (needFresh) {
+  // If this page isn't fully in DB yet, fetch Adzuna page N on demand.
+  // (Refresh only pre-seeded page 1 to keep Adzuna quota under control.)
+  if (jobsFromDb.length < PAGE_SIZE) {
     const { region } = await lookupCompanyRegion(companyName);
     const countries  = countriesForRegion(region);
     const adzunaRows = await fetchCompanyJobsPage(companyName, countries, { page, pageSize: PAGE_SIZE });
@@ -257,9 +252,24 @@ export async function GET(req: NextRequest, { params }: { params: { name: string
     };
   });
 
-  const total = await prisma.job.count({
+  // Use the authoritative count from IndustryCache (= Adzuna's `count`
+  // captured at refresh time). The badge on the table uses this same
+  // value, so pagination here matches the badge. DB count is only an
+  // implementation detail of what we've ingested so far.
+  const cacheCount = await (async () => {
+    const caches = await prisma.industryCache.findMany();
+    for (const c of caches) {
+      const data = c.data as unknown as { companies?: Array<{ name?: string; jobCount?: number }> };
+      const hit = data.companies?.find((cc) => cc.name === companyName);
+      if (hit && typeof hit.jobCount === "number") return hit.jobCount;
+    }
+    return null;
+  })();
+
+  const dbCount = await prisma.job.count({
     where: { company: { contains: companyName, mode: "insensitive" }, source: "adzuna" },
   });
+  const total = cacheCount ?? dbCount;
 
   return NextResponse.json({
     jobs,
