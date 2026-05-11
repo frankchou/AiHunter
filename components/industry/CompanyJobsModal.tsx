@@ -37,8 +37,20 @@ export function CompanyJobsModal({
   const [prompt, setPrompt] = useState<null | "free_no_tickets" | "pro_quota_exceeded" | "hash_unchanged">(null);
   const [promptData, setPromptData] = useState<{ resetAt?: string; tickets?: number }>({});
 
-  const key = `/api/companies/${encodeURIComponent(companyName)}/jobs?page=${page}`;
-  const { data, mutate, isLoading } = useSWR<PageResponse>(key, fetcher, { revalidateOnFocus: false });
+  // Unique token per modal mount → forces SWR to make a fresh request each
+  // time the modal opens, avoiding the "stale 1 row first, then 9 more"
+  // progressive-render issue caused by SWR's stale-while-revalidate.
+  const [mountToken] = useState(() => `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+  const key = `/api/companies/${encodeURIComponent(companyName)}/jobs?page=${page}&_t=${mountToken}`;
+  const { data, mutate, isLoading, isValidating } = useSWR<PageResponse>(key, fetcher, {
+    revalidateOnFocus: false,
+    revalidateIfStale: false,
+    dedupingInterval: 0,
+  });
+
+  // Treat any in-flight fetch as "still loading" so we never reveal a
+  // half-rendered page. Once data exists AND no fetch is running, render.
+  const showSpinner = isLoading || isValidating || !data;
 
   const { data: savedData } = useSWR<{ jobs: { jobId: string }[] }>("/api/saved", fetcher);
   const savedIds = new Set(savedData?.jobs?.map((j) => j.jobId) ?? []);
@@ -198,20 +210,24 @@ export function CompanyJobsModal({
           />
         )}
 
-        {/* Job list */}
+        {/* Job list — show ONE spinner during the whole load (Adzuna fetch +
+            DB upsert + per-user scoring). Only render JobCards when the
+            response is fully settled — prevents the "1 row first, 9 more
+            later" progressive flash. */}
         <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
-          {isLoading && (
-            <div style={{ textAlign: "center", padding: 40, color: "var(--ink-3)" }}>
-              <div className="spinner" style={{ margin: "0 auto 12px" }} />
-              載入中…
+          {showSpinner && (
+            <div style={{ textAlign: "center", padding: 60, color: "var(--ink-3)" }}>
+              <div className="spinner" style={{ margin: "0 auto 16px" }} />
+              <div style={{ fontSize: 13 }}>抓取職缺與 AI 評分中…</div>
+              <div style={{ fontSize: 11, marginTop: 6 }}>首次載入約 5–15 秒</div>
             </div>
           )}
-          {!isLoading && data && data.jobs.length === 0 && (
+          {!showSpinner && data && data.jobs.length === 0 && (
             <div style={{ textAlign: "center", padding: 40, color: "var(--ink-3)" }}>
               這頁沒有職缺。
             </div>
           )}
-          {!isLoading && data && data.jobs.length > 0 && (
+          {!showSpinner && data && data.jobs.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {data.jobs.map((j) => (
                 <JobCard

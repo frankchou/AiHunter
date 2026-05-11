@@ -131,10 +131,11 @@ export async function GET(req: NextRequest) {
         payload.companies.map(async (c) => {
           try {
             const countries = countriesForRegion(c.region);
-            const rows = await probeAndIngestCompanyJobs(c.name, countries);
+            const { count, firstPageJobs } = await probeAndIngestCompanyJobs(c.name, countries);
 
-            // Upsert each into Job table (dedupe by externalId)
-            await Promise.all(rows.map((r) =>
+            // Pre-ingest the first page so modal page 1 is instant.
+            // Modal pages 2+ fetch on demand.
+            await Promise.all(firstPageJobs.map((r) =>
               prisma.job.upsert({
                 where:  { externalId: r.externalId },
                 create: {
@@ -166,7 +167,7 @@ export async function GET(req: NextRequest) {
               }).catch(() => null),
             ));
 
-            return { ...c, jobCount: rows.length };
+            return { ...c, jobCount: count };
           } catch {
             return { ...c, jobCount: 0 };
           }

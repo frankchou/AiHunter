@@ -71,30 +71,64 @@ function getKey() {
   return { appId, appKey };
 }
 
-// The probe MUST match what the modal will actually show: we fetch page 1
-// (up to 50 results per country) and post-filter by `company.display_name`
-// so the badge number == the modal's reality. The previous version that
-// just read Adzuna's raw `count` field was wildly off for any company we
-// had to use the `what_phrase=` fallback for — that count is "jobs that
-// mention this string in the JD", not "jobs at this company".
+// Returns Adzuna's `count` (sum across countries) — the same number the
+// modal will use for pagination. Trust the search engine: if Adzuna says
+// 8980 results are relevant to "OpenAI", the modal paginates through all
+// of them. The post-filter applied in fetchCompanyJobsPage is the *display
+// guarantee* (we only show rows whose company display_name matches), not
+// the count source.
+//
+// Why not post-filter the count too? For names that fall back to
+// `what_phrase=`, post-filter is too aggressive — we'd show "10" when
+// Adzuna can give us hundreds (just spread across pages). The user wants
+// to be able to drill in.
+async function adzunaCountOne(country: string, companyName: string, k: { appId: string; appKey: string }): Promise<number> {
+  const base = `https://api.adzuna.com/v1/api/jobs/${country}/search/1`;
+  const common = { app_id: k.appId, app_key: k.appKey, results_per_page: 1 };
+  // Try strict company filter first
+  try {
+    const { data } = await axios.get<AdzunaSearchResponse>(base, {
+      params: { ...common, company: companyName },
+      timeout: 10_000,
+    });
+    return data.count ?? 0;
+  } catch (err) {
+    const status = (err as { response?: { status?: number } })?.response?.status;
+    if (status !== 400 && status !== 404) return 0;
+  }
+  // Fallback: phrase search
+  try {
+    const { data } = await axios.get<AdzunaSearchResponse>(base, {
+      params: { ...common, what_phrase: companyName },
+      timeout: 10_000,
+    });
+    return data.count ?? 0;
+  } catch {
+    return 0;
+  }
+}
+
+export async function probeCompanyJobCount(companyName: string, countries: string[]): Promise<number> {
+  const k = getKey();
+  if (!k || !companyName.trim()) return 0;
+  const counts = await Promise.all(countries.map((c) => adzunaCountOne(c, companyName, k)));
+  return counts.reduce((a, b) => a + b, 0);
+}
+
+// Also ingest the first page worth of jobs at refresh time so modal page 1
+// is already in our Job table. Modal pages 2+ fetch on-demand.
 export async function probeAndIngestCompanyJobs(
   companyName: string,
   countries: string[],
-): Promise<AdzunaJobRow[]> {
+): Promise<{ count: number; firstPageJobs: AdzunaJobRow[] }> {
   const k = getKey();
-  if (!k || !companyName.trim()) return [];
+  if (!k || !companyName.trim()) return { count: 0, firstPageJobs: [] };
 
-  // Use the same fetch+filter pipeline as the modal — gives consistent count
-  return fetchCompanyJobsPage(companyName, countries, { page: 1, pageSize: 50 });
-}
-
-// Back-compat shim — returns the count from probeAndIngestCompanyJobs.
-// Callers that just need a number can use this; callers that want to also
-// upsert the jobs at refresh time should use probeAndIngestCompanyJobs
-// directly so they don't have to re-query Adzuna.
-export async function probeCompanyJobCount(companyName: string, countries: string[]): Promise<number> {
-  const rows = await probeAndIngestCompanyJobs(companyName, countries);
-  return rows.length;
+  const [count, firstPageJobs] = await Promise.all([
+    probeCompanyJobCount(companyName, countries),
+    fetchCompanyJobsPage(companyName, countries, { page: 1, pageSize: 10 }),
+  ]);
+  return { count, firstPageJobs };
 }
 
 // Fetch one page of jobs for a company. Spread across `countries` —
@@ -147,9 +181,11 @@ export async function fetchCompanyJobsPage(
   await Promise.all(countries.map(async (country) => {
     const results = await adzunaFetchCountry(country, companyName, opts.page, perCountry, k);
     for (const j of results) {
-      // Always post-filter by company name (covers both `company=` and
-      // `what_phrase=` fallback paths — the latter returns lots of noise)
-      if (!j.company?.display_name?.toLowerCase().includes(companyName.toLowerCase())) continue;
+      // Note: we trust Adzuna's search relevance — `company=` was strict
+      // already, and `what_phrase=` fallback returns whatever Adzuna thinks
+      // is relevant. Each card displays the actual company.display_name so
+      // the user can spot mismatches themselves.
+      if (!j.company?.display_name) continue;
       const area = j.location?.area ?? [];
       const city = area[area.length - 1] ?? j.location?.display_name ?? country.toUpperCase();
       collected.push({
