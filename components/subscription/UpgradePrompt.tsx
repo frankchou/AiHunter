@@ -110,7 +110,7 @@ export function UpgradePrompt({ planTier, feature, onUnlocked, onClose }: Props)
                 onClick={() => router.push("/pricing")}
                 style={{ width: "100%", padding: "10px 0" }}
               >
-                🚀 升級方案（$9.9/月起）
+                🚀 升級方案（NT$300/月起）
               </button>
               {onClose && (
                 <button className="btn" onClick={onClose} style={{ width: "100%", color: "var(--ink-3)" }}>

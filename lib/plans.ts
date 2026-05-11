@@ -24,7 +24,8 @@ export const PLANS = {
   free: {
     name: "Free",
     nameZh: "免費版",
-    monthlyUsd: 0,
+    monthlyTwd: 0,
+    currency:   "TWD",
     stripePriceId: null as string | null,
     limits: {
       insightsPerMonth:        3,
@@ -46,7 +47,8 @@ export const PLANS = {
   pro: {
     name: "Pro",
     nameZh: "專業版",
-    monthlyUsd: 9.9,
+    monthlyTwd: 300,
+    currency:   "TWD",
     stripePriceId: process.env.STRIPE_PRO_PRICE_ID ?? null,
     limits: {
       insightsPerMonth:        30,
@@ -68,7 +70,8 @@ export const PLANS = {
   max: {
     name: "Max",
     nameZh: "旗艦版",
-    monthlyUsd: 29.9,
+    monthlyTwd: 800,
+    currency:   "TWD",
     stripePriceId: process.env.STRIPE_MAX_PRICE_ID ?? null,
     limits: {
       insightsPerMonth:        null as number | null,

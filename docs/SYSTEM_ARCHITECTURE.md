@@ -78,9 +78,9 @@ AiHunter/
 │   │   └── CoCreatePanel.tsx  # 共創對話面板（桌機側拉 / 手機全螢幕 sheet）
 │   ├── subscription/
 │   │   ├── AdWatcher.tsx       # 廣告觀看元件（3 則序列）
-│   │   ├── PricingView.tsx     # 方案選擇頁（含取消/降級按鈕）
+│   │   ├── PricingView.tsx     # 方案選擇頁（含取消/降級按鈕；TWD 顯示）
 │   │   ├── BillingView.tsx     # 管理訂閱頁（付款方式、帳單紀錄、方案變更）
-│   │   ├── PlanChangeModal.tsx # 取消/降級回饋收集 modal
+│   │   ├── PlanChangeModal.tsx # 取消/降級兩階段 modal（Impact 警告 → Feedback 收集）
 │   │   └── UpgradePrompt.tsx   # 升級提示（保留備用）
 │   ├── settings/
 │   │   └── SettingsView.tsx   # 設定頁（方案資訊）
@@ -363,18 +363,41 @@ onComplete() → 自動重試原 AI 功能
 
 ### 訂閱付費流程
 
+**目前定價**：Free NT$0 / Pro NT$300 / Max NT$800（月付制，無年付）。  
+**目前金流**：以 ECPay 綠界為主（台灣市場）；Stripe 程式碼保留作為未來全球化備援。
+
 ```
-用戶選擇方案 → POST /api/stripe/checkout
+用戶選擇方案 → POST /api/stripe/checkout（Stripe）or /api/ecpay/subscribe（ECPay，未實作）
     ↓
-stripe.checkout.sessions.create()
+建立 Checkout / 定期定額連結
     ↓
-跳轉 Stripe 付款頁
+跳轉付款頁
     ↓（付款完成）
-Stripe Webhook → POST /api/stripe/webhook
+Webhook → 更新 prisma.user.planTier
+```
+
+### 取消 / 降級流程（兩階段 UI）
+
+```
+用戶按「取消訂閱」或「降級為 Pro」
     ↓
-checkout.session.completed
-    → stripe.subscriptions.retrieve()
-    → prisma.user.update({ planTier })
+PlanChangeModal 開啟 — Step 1: Impact 警告
+    ├─ 顯示「會失去什麼 / 配額會降到哪 / 會保留什麼」
+    ├─ [保留方案]   ← 多數人在這步打消念頭（loss aversion）
+    └─ [繼續取消/降級]
+        ↓
+    Step 2: Feedback 收集
+    ├─ 多選原因（7 個 enum）
+    ├─ 自由文字
+    └─ [確認取消/降級] → POST /api/stripe/cancel 或 /downgrade
+        ↓
+    後端：
+    ├─ cancel:    stripe.subscriptions.update({ cancel_at_period_end: true })
+    ├─ downgrade: stripe.subscriptionSchedules.create() 兩階段排程
+    ├─ 寫入 CancellationFeedback
+    └─ 更新 user.pendingPlanTier / pendingPlanAt
+        ↓
+    當期結束 → Stripe webhook → user.planTier 更新
 ```
 
 ---

@@ -98,9 +98,9 @@ export function SettingsView() {
             <div>
               <div style={{ fontWeight: 700, fontSize: 18 }}>
                 {plan.nameZh}
-                {plan.monthlyUsd > 0 && (
+                {plan.monthlyTwd > 0 && (
                   <span style={{ fontWeight: 400, fontSize: 13, color: "var(--ink-3)", marginLeft: 8 }}>
-                    ${plan.monthlyUsd}/月
+                    NT${plan.monthlyTwd}/月
                   </span>
                 )}
               </div>

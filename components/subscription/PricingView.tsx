@@ -88,8 +88,8 @@ export function PricingView({ currentTier, usageSummary }: Props) {
                 <span className="eyebrow">{plan.nameZh}</span>
               </div>
               <div style={{ fontSize: 28, fontWeight: 800, marginBottom: 4 }}>
-                {plan.monthlyUsd === 0 ? "免費" : `$${plan.monthlyUsd}`}
-                {plan.monthlyUsd > 0 && <span style={{ fontSize: 13, fontWeight: 400, color: "var(--ink-3)" }}> / 月</span>}
+                {plan.monthlyTwd === 0 ? "免費" : `NT$${plan.monthlyTwd}`}
+                {plan.monthlyTwd > 0 && <span style={{ fontSize: 13, fontWeight: 400, color: "var(--ink-3)" }}> / 月</span>}
               </div>
 
               <ul style={{ padding: "0 0 0 16px", margin: "12px 0 20px", fontSize: 13, color: "var(--ink-2)", lineHeight: 1.9, flex: 1 }}>

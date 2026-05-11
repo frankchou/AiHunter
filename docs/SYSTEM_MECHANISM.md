@@ -7,8 +7,10 @@
 | 方案 | 月費 | AI 深度分析 | 履歷解析/分析（含 CV 編寫） | 產業刷新 | 廣告解鎖 | 針對性履歷 + 針對性 CV | 履歷版控 |
 |------|------|------------|---------------------------|---------|---------|---------------------|---------|
 | **Free** | 免費 | 3 次/月 | 3 次/月（履歷+CV 共用）| 需解析券（Top 20）| ✅ | ❌ | ❌ |
-| **Pro** | $9.9 | 30 次/月 | 15 次/月（履歷+CV 共用）| 無限（Top 20）| ❌ | ❌ | ❌ |
-| **Max** | $29.9 | 無限 | 無限 | 無限（Top 20）| ❌ | ✅ 無限 | ✅ |
+| **Pro** | NT$300 / 月 | 30 次/月 | 15 次/月（履歷+CV 共用）| 無限（Top 20）| ❌ | ❌ | ❌ |
+| **Max** | NT$800 / 月 | 無限 | 無限 | 無限（Top 20）| ❌ | ✅ 無限 | ✅ |
+
+> **定價策略（2026-05-09 拍板）**：先打台灣市場，TWD 定價。Pro NT$300 對標 Notion Plus；Max NT$800 跳出 ChatGPT Plus（NT$640）的「通用 AI」比較區，定位「專業 SaaS 工具」。Pro→Max 跳幅 2.67x，SaaS 經典甜蜜點。未來全球化後可加 USD 對應價（$9.9 / $29.9）。
 
 > **Super User**（`User.isSuperUser=true` 資料庫欄位）：跳過所有限制，無限使用所有功能。設定方式為直接在 DB 改 `User.isSuperUser=true`，不再使用環境變數或硬編碼 email。
 
@@ -194,7 +196,27 @@ STRIPE_MAX_PRICE_ID=price_...
 | **降級（Max → Pro）** | `stripe.subscriptionSchedules.create({ from_subscription })` 建立兩階段排程：phase1 Max 至期末 → phase2 Pro 1 個月 → end_behavior `release` 後續正常 Pro 訂閱 | 當期結束時自動切換 |
 | **還原** | 取消的 `cancel_at_period_end=false`；降級的釋放 `subscriptionSchedules.release` | 立即生效 |
 
-> 每次取消或降級都跳出 modal 收集回饋（多選原因 + 自由文字），存入 `CancellationFeedback` 表用於日後產品優化。
+### 取消 / 降級的兩階段 UI 流程（PlanChangeModal）
+
+點下「取消訂閱」或「降級為 Pro」後跳出 modal，採用**兩階段 loss-aversion 設計**：
+
+1. **Impact warning（第一階段）**：明確列出取消/降級後**會失去什麼**、**會降級到什麼配額**、**會保留什麼**。內容依「動作種類 × 來源方案」分三套（cancel-pro / cancel-max / downgrade-max）。底部兩個按鈕：
+   - 「**保留方案**」（主要按鈕、推薦的選項）→ 關閉 modal、保留訂閱
+   - 「**繼續取消/降級**」→ 進入第二階段
+
+2. **Feedback 收集（第二階段）**：跳出多選原因（7 個 enum）+ 自由文字。原因必填（取消）/ 選填（降級）。可點「← 返回」回到 Impact 警告。
+
+> 設計依據：標準 SaaS 留客模式可降低 15-25% 的取消意願；同時搜集到的 churn 原因進 `CancellationFeedback` 表做產品優化。
+
+### 金流串接
+
+**現階段串接 ECPay 綠界**（台灣本地市場）：
+- 訂閱：信用卡定期定額（需在綠界後台額外申請開通）
+- 月費：Pro NT$300 / Max NT$800
+- 抽成：信用卡 2.75% + NT$5/筆（一般廠商）或 2.85% + NT$5/筆（個人賣家）
+- 撥款：T+7~30 工作天匯入綁定銀行帳戶
+
+> Stripe 程式碼保留（routes 與 schema 欄位都還在），未來全球化時可重新啟用。
 
 ---
 
