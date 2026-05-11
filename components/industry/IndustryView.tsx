@@ -1,6 +1,6 @@
 "use client";
-import { useState, useMemo, useEffect, useRef } from "react";
-import useSWR from "swr";
+import { useState, useMemo, useEffect } from "react";
+import useSWR, { mutate as globalMutate } from "swr";
 import { INDUSTRIES } from "@/lib/mock-data";
 import { fmtCompactMoney, fmtPct } from "@/lib/utils";
 import { CompanyJobsModal } from "@/components/industry/CompanyJobsModal";
@@ -37,37 +37,59 @@ function PriceCell({ quote }: { quote: StockQuote | undefined }) {
   );
 }
 
+interface UserProfile {
+  planTier?: string;
+  isSuperUser?: boolean;
+  lastViewedIndustry?: string | null;
+}
+
 export function IndustryView() {
-  const [selectedIndustry, setSelectedIndustry] = useState(INDUSTRIES[0].id);
+  // null = no selection yet (first-ever visit). Initial value is resolved
+  // from the user's saved lastViewedIndustry once the profile loads.
+  const [selectedIndustry, setSelectedIndustry] = useState<string | null>(null);
+  const [profileInitialized, setProfileInitialized] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [openCompany, setOpenCompany] = useState<{ name: string; count: number } | null>(null);
 
-  const { data, isLoading, mutate } = useSWR<{
-    companies: AiCompany[]; cached: boolean; stale?: boolean; empty?: boolean;
-  }>(
-    `/api/industries?industry=${selectedIndustry}&_r=${refreshKey}`,
-    fetcher,
-    { revalidateOnFocus: false }
-  );
-
-  // Profile drives auto-fetch decision: Pro/Max/SuperUser silently auto-generate
-  // on cache miss (refresh is free for them); Free users see CTA so we never
-  // bypass the billing gate.
-  const { data: profile } = useSWR<{ planTier?: string; isSuperUser?: boolean }>(
+  const { data: profile } = useSWR<UserProfile>(
     "/api/user/profile",
     fetcher,
     { revalidateOnFocus: false }
   );
-  const canAutoFetch = !!profile && (
-    profile.planTier === "pro" ||
-    profile.planTier === "max" ||
-    profile.isSuperUser === true
+
+  // Initialize selection from saved profile ONCE — after that, user picks drive it.
+  useEffect(() => {
+    if (profileInitialized) return;
+    if (!profile) return;
+    if (profile.lastViewedIndustry) setSelectedIndustry(profile.lastViewedIndustry);
+    setProfileInitialized(true);
+  }, [profile, profileInitialized]);
+
+  const { data, isLoading, mutate } = useSWR<{
+    companies: AiCompany[]; cached: boolean; stale?: boolean;
+  }>(
+    selectedIndustry ? `/api/industries?industry=${selectedIndustry}&_r=${refreshKey}` : null,
+    fetcher,
+    { revalidateOnFocus: false }
   );
 
   const [refreshing, setRefreshing] = useState(false);
   const [refreshError, setRefreshError] = useState<{ tickets: number; planTier: string } | null>(null);
 
+  // Persist chip selection to the user record (cross-device, cross-session).
+  // Fire-and-forget — UI updates locally first; if the patch fails the
+  // sticky preference just doesn't update, which is non-fatal.
+  const pickIndustry = (id: string) => {
+    setSelectedIndustry(id);
+    fetch("/api/user/profile", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lastViewedIndustry: id }),
+    }).then(() => globalMutate("/api/user/profile")).catch(() => {});
+  };
+
   const triggerRefresh = async () => {
+    if (!selectedIndustry) return;
     setRefreshing(true);
     setRefreshError(null);
     try {
@@ -87,23 +109,6 @@ export function IndustryView() {
       setRefreshing(false);
     }
   };
-
-  // Auto-fetch on cache miss for eligible plans. One attempt per industry per
-  // session — if generation fails, fall through to the CTA card so user can
-  // retry manually instead of looping.
-  const autoTriedRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    if (isLoading) return;
-    if (!data?.empty) return;
-    if (!canAutoFetch) return;
-    if (refreshing) return;
-    if (autoTriedRef.current.has(selectedIndustry)) return;
-    autoTriedRef.current.add(selectedIndustry);
-    triggerRefresh();
-    // triggerRefresh is intentionally not a dep — it closes over selectedIndustry
-    // which is in deps, so each call uses the current industry.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, data?.empty, canAutoFetch, selectedIndustry, refreshing]);
 
   const companies = data?.companies ?? [];
 
@@ -128,9 +133,8 @@ export function IndustryView() {
       <div className="section-h">
         <h3>產業 Top 20</h3>
         <span className="sub">AI 彙整各產業頂尖雇主 · 每 7 天更新</span>
-        {/* "重新獲取" is for proactively re-pulling existing data.
-            Hide when there's no data yet — empty-state card handles that flow. */}
-        {!data?.empty && (
+        {/* "重新獲取" needs an active selection + existing data. */}
+        {selectedIndustry && companies.length > 0 && (
           <button
             className="btn"
             style={{ marginLeft: "auto", fontSize: 12 }}
@@ -149,7 +153,7 @@ export function IndustryView() {
         {INDUSTRIES.map((ind) => (
           <span key={ind.id}
             className={`chip${selectedIndustry === ind.id ? " active" : ""}`}
-            onClick={() => { setSelectedIndustry(ind.id); }}>
+            onClick={() => pickIndustry(ind.id)}>
             {ind.name}
           </span>
         ))}
@@ -175,51 +179,25 @@ export function IndustryView() {
         </div>
       )}
 
-      {isLoading && (
+      {/* Loading: same UI for cache hit (fast) and cache miss (~30s AI gen).
+          Backend handles auto-gen transparently — UI just waits. */}
+      {selectedIndustry && isLoading && (
         <div style={{ textAlign: "center", padding: 60 }}>
           <div className="spinner" style={{ margin: "0 auto 16px" }} />
           <div className="eyebrow">載入中…</div>
-        </div>
-      )}
-
-      {/* Empty + eligible plan → auto-fetch is running (or about to). Show
-          a single unified spinner so the user never sees the "no data, click
-          button" intermediate state. */}
-      {!isLoading && data?.empty && canAutoFetch && (
-        <div className="card" style={{ textAlign: "center", padding: 40 }}>
-          <div className="spinner" style={{ margin: "0 auto 16px" }} />
-          <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>AI 分析中…</div>
-          <div style={{ fontSize: 12, color: "var(--ink-3)", lineHeight: 1.6 }}>
-            正在收集 Top 20 公司 + 抓取最新職缺，約需 30 秒
+          <div style={{ fontSize: 11, color: "var(--ink-4)", marginTop: 8 }}>
+            首次選擇某類別時會即時抓取 Top 20 公司清單，約需 30 秒
           </div>
         </div>
       )}
 
-      {/* Empty + Free user → CTA (do NOT auto-spend tickets). */}
-      {!isLoading && data?.empty && !canAutoFetch && profile && (
-        <div className="card" style={{ textAlign: "center", padding: 40 }}>
-          <div style={{ fontSize: 28, marginBottom: 12 }}>📊</div>
-          <div style={{ fontWeight: 600, fontSize: 15, marginBottom: 6 }}>尚未有此產業的資料</div>
-          <div style={{ fontSize: 13, color: "var(--ink-3)", marginBottom: 16, lineHeight: 1.6 }}>
-            由 AI 分析 Top 20 公司 + 抓取最新職缺，消耗 <b>3 張解析券</b>。<br />
-            升級 Pro / Max 享無限次自動更新。
-          </div>
-          <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
-            <button className="btn primary" onClick={triggerRefresh} disabled={refreshing} style={{ fontSize: 13 }}>
-              {refreshing ? "抓取中…" : "🔄 獲取資料（3 張券）"}
-            </button>
-            <a href="/pricing" className="btn" style={{ fontSize: 13 }}>升級方案</a>
-          </div>
-        </div>
-      )}
-
-      {!isLoading && !data?.empty && companies.length === 0 && (
+      {selectedIndustry && !isLoading && companies.length === 0 && (
         <div className="card" style={{ textAlign: "center", color: "var(--ink-3)", padding: 40 }}>
           無法載入資料，請稍後再試
         </div>
       )}
 
-      {!isLoading && companies.length > 0 && (
+      {selectedIndustry && !isLoading && companies.length > 0 && (
         <div className="industry-table">
           <table>
             <thead>

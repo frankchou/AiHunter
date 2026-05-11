@@ -146,24 +146,29 @@ STRIPE_PRO_PRICE_ID=price_...
 STRIPE_MAX_PRICE_ID=price_...
 ```
 
-### 產業 Top 20 進入頁 UX（cache-aware auto-fetch）
+### 產業 Top 20 進入頁 UX（first-fetch-free + sticky last-viewed）
 
-進入 `/industry` 或切換產業 chip 時，前端先讀 `GET /api/industries`（不收費）。依結果分流：
+進入 `/industry`：
 
 | 場景 | 行為 |
 |------|------|
-| Cache 有資料（fresh 或 stale）| 直接顯示。stale 時加一條 banner 提示「資料超過 7 天，建議重新獲取」 |
-| Cache 沒資料、`profile` 為 **Pro / Max / SuperUser** | 前端**自動**發 `?refresh=1`（gate 對這幾個 plan 不扣券）→ 顯示「AI 分析中…」spinner card |
-| Cache 沒資料、`profile` 為 **Free** | 顯示 CTA card：「需 3 張解析券」或升級連結（**不偷扣**）|
+| 使用者**從沒選過任何類別**（`User.lastViewedIndustry === null`）| 不預設選中任何 chip，下方空白，等使用者點 chip |
+| 使用者**之前選過**（`lastViewedIndustry === X`）| 自動套用 X、`GET /api/industries?industry=X` → 顯示 cache |
+| 點 chip 切換類別 | `setSelectedIndustry` + `PATCH /api/user/profile { lastViewedIndustry }` → SWR 重發 GET |
 
-**「🔄 重新獲取」按鈕**：只在「已有資料」時顯示。語意 = 在有資料的情況下主動更新（同樣走 `consumeUsage("industryRefresh")` gate）。
+**GET `/api/industries?industry=X` 的後端決策**：
+- IndustryCache 該類別 row 存在 → 直接回（含 stale flag）。
+- IndustryCache 該類別 row **不存在** → **後端即時生成**（Claude + Adzuna probe + 寫 cache + 回），**不過 gate、不扣任何使用者**。一旦寫入後，後續任何閱覽都讀 cache，不會再 auto-gen。
 
-**Auto-fetch 防呆**：`autoTriedRef` per-session per-industry 只試一次。若 generate 失敗（網路或 AI error）不會無限重試，落回 CTA card，使用者可手動再試。
+**「🔄 重新獲取」按鈕**：只在有資料時可見，走 POST 風格的 `?refresh=1`，必過 `consumeUsage("industryRefresh")` gate：
+- Free：3 張解析券（不夠 → 看廣告獲取）
+- Pro / Max / SuperUser：通過 gate 但 `industryRefreshPerMonth=null`（無限）→ 直接執行
 
-**為何安全（不違反「cache 空時禁止 auto-generate」鐵律）**：
-- API 端的 GET 仍不會 auto-generate；auto-fetch 是前端**顯式呼叫 `?refresh=1`**，必然經過 `consumeUsage` gate。
-- Free 永遠看到 CTA、不會被前端偷觸發。
-- Pro/Max/SuperUser 對該 gate 本來就免費，所以「自動」與「按鈕」零差別。
+**為何安全（first-fetch-free 不會被 abuse）**：
+- 一個類別只在 IndustryCache 該 row **完全不存在**時 auto-gen，寫入後就佔據該 row 永久。
+- 重整頁面、切類別來回、不同使用者輪流訪問都讀同一個 cache row，不會重複觸發 auto-gen。
+- 想要更新資料只能走付費的 `?refresh=1`。
+- Free 用戶最多能在「系統還沒有任何使用者建立過該類別 cache」時觸發一次免費生成（系統等級的 one-shot per 類別）。
 
 ---
 
@@ -219,7 +224,7 @@ STRIPE_MAX_PRICE_ID=price_...
 | Endpoint | 何時收費 | 行動 / Plan 限制 |
 |----------|---------|----------------|
 | POST `/api/industries?refresh=1` | 顯式 `refresh=1` | `industryRefresh`（3 張券；Pro/Max 免費） |
-| GET `/api/industries`（無 refresh） | 永遠不收費 | 只讀 IndustryCache；無 cache → 回 `empty: true`，**不會 generate**。前端對 Pro/Max/SuperUser 會自動補打 `?refresh=1`（仍經 gate）|
+| GET `/api/industries`（無 refresh） | 永遠不收費 | IndustryCache 有 row → 讀 cache；無 row → **後端 auto-gen 一次（first-fetch-free，所有 plan 都不扣）**並寫 row。寫入後永久不再 auto-gen，更新要走 `?refresh=1`。|
 | POST `/api/jobs/[id]/insights` | 每次呼叫 | `insight`（Free 3、Pro 30、Max ∞）；GET 永遠免費讀 |
 | POST `/api/resume/parse` | 每次成功上傳 | `analysis`；先驗證 rawText 有內容才扣 |
 | POST `/api/resume/analyze` | 內容 hash 不同才收費 | `analysis`；同 hash → 直接回 cache，不收 |

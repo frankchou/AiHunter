@@ -96,28 +96,20 @@ export async function GET(req: NextRequest) {
       const fresh = ageMs < CACHE_TTL_DAYS * 24 * 60 * 60 * 1000;
       if (!forceRefresh) {
         // Normal browse: return whatever's there (fresh or stale).
-        // We DO NOT auto-generate on a missing/stale cache — generation
-        // costs AI tokens + ~80 Adzuna queries and would let free users
-        // bypass the billing mechanism just by reloading the page.
         payload = existing.data as unknown as Payload;
         cached  = true;
         stale   = !fresh;
       }
     }
 
-    if (!forceRefresh && !payload) {
-      // Cache entirely empty AND no refresh requested → empty state,
-      // UI shows "點重新獲取生成資料" CTA.
-      return NextResponse.json({
-        companies: [],
-        industries: INDUSTRIES,
-        cached: false,
-        stale: false,
-        empty: true,
-      });
-    }
+    // Cache miss path:
+    //  - forceRefresh: charged above via consumeUsage("industryRefresh")
+    //  - first-ever browse (no existing row): FREE auto-gen for any plan.
+    //    Bounded because once written, the IndustryCache row keeps serving
+    //    reads forever — no per-page-reload AI cost vector.
+    const needsGeneration = forceRefresh || !payload;
 
-    if (forceRefresh) {
+    if (needsGeneration) {
       // ── AI Top 20 generation ───────────────────────────────────────
       payload = (await generateIndustryTop(industry)) as Payload;
 
