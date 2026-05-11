@@ -1,6 +1,29 @@
 import axios from "axios";
 import { hashUrl } from "@/lib/utils";
 
+// Adzuna's free-tier rate limit is aggressive — empirically, firing 20
+// parallel calls returns 429 on ~16 of them. All Adzuna API traffic in
+// this module flows through this single limiter so background refreshes
+// (which can otherwise dispatch 120+ concurrent calls) play nice.
+const adzunaLimit = (() => {
+  const CONCURRENCY = 4;
+  let active = 0;
+  const queue: Array<() => void> = [];
+  return async function <T>(fn: () => Promise<T>): Promise<T> {
+    if (active >= CONCURRENCY) {
+      await new Promise<void>((resolve) => queue.push(resolve));
+    }
+    active++;
+    try {
+      return await fn();
+    } finally {
+      active--;
+      const next = queue.shift();
+      if (next) next();
+    }
+  };
+})();
+
 // Adzuna response shape (subset we care about)
 interface AdzunaApiJob {
   id:           string;
@@ -104,12 +127,11 @@ export function canonicalCompanyName(name: string): string {
 // THAT count for the badge. The modal applies the same filter, so the
 // numbers match.
 const PHRASE_SAMPLE_SIZE = 50;        // Adzuna's per-page max
-// Deep-scan budget: how many Adzuna pages we'll walk for what_phrase
-// fallback. 20 × 50 = 1000 candidates per country. Beyond that the
-// match-yield falls off and the API-call cost (vs Adzuna's free 250k
-// quota) starts mattering. Refresh is a rare operation so the runtime
-// hit (a few seconds per fallback company) is acceptable.
-const PHRASE_FALLBACK_PAGES = 20;
+// Deep-scan budget for what_phrase fallback. 5 × 50 = 250 candidates per
+// country. Beyond ~5 pages the match-yield falls off sharply and rate-
+// limit risk climbs; empirically this captures most of the
+// display_name=Employer rows for fallback employers (OpenAI etc).
+const PHRASE_FALLBACK_PAGES = 5;
 
 function matchesDisplayName(j: AdzunaApiJob, companyName: string): boolean {
   const dn = j.company?.display_name;
@@ -132,12 +154,14 @@ async function deepScanWhatPhrase(
   const matched: AdzunaApiJob[] = [];
   for (let page = 1; page <= PHRASE_FALLBACK_PAGES; page++) {
     try {
-      const { data } = await axios.get<AdzunaSearchResponse>(
-        `https://api.adzuna.com/v1/api/jobs/${country}/search/${page}`,
-        {
-          params: { app_id: k.appId, app_key: k.appKey, results_per_page: PHRASE_SAMPLE_SIZE, sort_by: "date", what_phrase: companyName },
-          timeout: 12_000,
-        },
+      const { data } = await adzunaLimit(() =>
+        axios.get<AdzunaSearchResponse>(
+          `https://api.adzuna.com/v1/api/jobs/${country}/search/${page}`,
+          {
+            params: { app_id: k.appId, app_key: k.appKey, results_per_page: PHRASE_SAMPLE_SIZE, sort_by: "date", what_phrase: companyName },
+            timeout: 12_000,
+          },
+        ),
       );
       const rows = data.results ?? [];
       for (const j of rows) if (matchesDisplayName(j, companyName)) matched.push(j);
@@ -152,12 +176,14 @@ async function deepScanWhatPhrase(
 async function adzunaCountOne(country: string, companyName: string, k: { appId: string; appKey: string }): Promise<number> {
   // Strict path: Adzuna's company index is authoritative — use its count as-is.
   try {
-    const { data } = await axios.get<AdzunaSearchResponse>(
-      `https://api.adzuna.com/v1/api/jobs/${country}/search/1`,
-      {
-        params: { app_id: k.appId, app_key: k.appKey, results_per_page: 1, company: companyName },
-        timeout: 10_000,
-      },
+    const { data } = await adzunaLimit(() =>
+      axios.get<AdzunaSearchResponse>(
+        `https://api.adzuna.com/v1/api/jobs/${country}/search/1`,
+        {
+          params: { app_id: k.appId, app_key: k.appKey, results_per_page: 1, company: companyName },
+          timeout: 10_000,
+        },
+      ),
     );
     return data.count ?? 0;
   } catch {
@@ -188,12 +214,14 @@ async function scanCountryProbeAndRows(
 ): Promise<{ count: number; rows: AdzunaApiJob[] }> {
   // Strict path. data.count is real total; data.results is just this page.
   try {
-    const { data } = await axios.get<AdzunaSearchResponse>(
-      `https://api.adzuna.com/v1/api/jobs/${country}/search/1`,
-      {
-        params: { app_id: k.appId, app_key: k.appKey, results_per_page: PHRASE_SAMPLE_SIZE, sort_by: "date", company: companyName },
-        timeout: 12_000,
-      },
+    const { data } = await adzunaLimit(() =>
+      axios.get<AdzunaSearchResponse>(
+        `https://api.adzuna.com/v1/api/jobs/${country}/search/1`,
+        {
+          params: { app_id: k.appId, app_key: k.appKey, results_per_page: PHRASE_SAMPLE_SIZE, sort_by: "date", company: companyName },
+          timeout: 12_000,
+        },
+      ),
     );
     return { count: data.count ?? 0, rows: data.results ?? [] };
   } catch {
@@ -271,12 +299,14 @@ async function adzunaFetchCountry(
 ): Promise<AdzunaApiJob[]> {
   // Strict path: trust Adzuna's company-indexed results as-is, page-by-page.
   try {
-    const { data } = await axios.get<AdzunaSearchResponse>(
-      `https://api.adzuna.com/v1/api/jobs/${country}/search/${page}`,
-      {
-        params: { app_id: k.appId, app_key: k.appKey, results_per_page: perPage, sort_by: "date", company: companyName },
-        timeout: 12_000,
-      },
+    const { data } = await adzunaLimit(() =>
+      axios.get<AdzunaSearchResponse>(
+        `https://api.adzuna.com/v1/api/jobs/${country}/search/${page}`,
+        {
+          params: { app_id: k.appId, app_key: k.appKey, results_per_page: perPage, sort_by: "date", company: companyName },
+          timeout: 12_000,
+        },
+      ),
     );
     return data.results ?? [];
   } catch {
