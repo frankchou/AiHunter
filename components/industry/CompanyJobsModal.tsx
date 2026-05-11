@@ -3,6 +3,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import useSWR, { mutate as globalMutate } from "swr";
 import { JobCard } from "@/components/jobs/JobCard";
+import { AdWatcher } from "@/components/subscription/AdWatcher";
+import { AD_UNLOCK_ENABLED } from "@/lib/plans";
 import type { Job } from "@/lib/types";
 
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
@@ -22,6 +24,9 @@ interface PageResponse {
     pageSize:         number;
     currentParsedHash: string | null;
     canRecalculate:   boolean;
+    needsResume:      boolean;
+    ticketCost:       number;
+    adSessionsLeft:   number;
   };
 }
 
@@ -34,8 +39,9 @@ export function CompanyJobsModal({
 }) {
   const [page, setPage] = useState(1);
   const [unlocking, setUnlocking] = useState(false);
-  const [prompt, setPrompt] = useState<null | "free_no_tickets" | "pro_quota_exceeded" | "hash_unchanged">(null);
+  const [prompt, setPrompt] = useState<null | "unlock_confirm" | "pro_quota_exceeded" | "hash_unchanged">(null);
   const [promptData, setPromptData] = useState<{ resetAt?: string; tickets?: number }>({});
+  const [showAdWatcher, setShowAdWatcher] = useState(false);
 
   // Unique token per modal mount → forces SWR to make a fresh request each
   // time the modal opens, avoiding the "stale 1 row first, then 9 more"
@@ -86,8 +92,12 @@ export function CompanyJobsModal({
         return;
       }
       if (json.error === "FREE_NO_TICKETS") {
-        setPrompt("free_no_tickets");
-        setPromptData({ tickets: json.tickets });
+        // Should rarely fire — UI normally gates this via lock click +
+        // unlock_confirm prompt — but if the user's tickets drop between
+        // the GET and POST, fall back to the confirm flow which has the
+        // ad-watch path.
+        setPrompt("unlock_confirm");
+        setPromptData({ tickets: json.tickets ?? 0 });
         return;
       }
       if (json.error === "HASH_UNCHANGED") {
@@ -98,6 +108,31 @@ export function CompanyJobsModal({
     } finally {
       setUnlocking(false);
     }
+  };
+
+  // Lock click handler — branches by plan tier and current quota state.
+  // Free / Pro-over-quota / paid-but-no-resume all route here; the prompt
+  // body adapts based on `data.policy`.
+  const handleLockClick = () => {
+    if (!data) return;
+    if (data.policy.needsResume) {
+      // No actionable unlock for this branch — banner above already nudges
+      // to /resume; the click is a no-op here. Keeping the lock visible
+      // (vs hiding) makes the "no score yet" state still legible.
+      return;
+    }
+    if (data.policy.tier === "pro" && pageHasLocks) {
+      setPrompt("pro_quota_exceeded");
+      setPromptData({ resetAt: data.policy.proUsage?.resetAt });
+      return;
+    }
+    if (data.policy.tier === "free") {
+      setPrompt("unlock_confirm");
+      return;
+    }
+    // Max with locks should not happen — auto-score covers them. If somehow
+    // we reach here (transient race), invoke a regular unlock attempt.
+    unlockPage();
   };
 
   const toggleSaved = async (jobId: string, currentlySaved: boolean) => {
@@ -111,7 +146,9 @@ export function CompanyJobsModal({
 
   const lockedOnThisPage = (data?.jobs ?? []).filter((j) => j.locked);
   const pageHasLocks    = lockedOnThisPage.length > 0;
-  const everyJobScored  = (data?.jobs ?? []).every((j) => !j.locked);
+  // Require at least one job — otherwise [].every() is vacuously true and
+  // we'd show the "重新計算分數" button on an empty page.
+  const everyJobScored  = (data?.jobs ?? []).length > 0 && (data?.jobs ?? []).every((j) => !j.locked);
 
   const totalPages = data?.pagination
     ? Math.max(1, Math.ceil(data.pagination.total / data.pagination.pageSize))
@@ -153,27 +190,32 @@ export function CompanyJobsModal({
           <button className="btn" onClick={onClose} style={{ fontSize: 12 }}>✕ 關閉</button>
         </div>
 
-        {/* Top action bar — unlock (Free only) + recalculate (Pro/Max) */}
+        {/* Top action bar — unlock CTA (Free) + recalculate (Pro/Max).
+            The Free unlock button is kept here in addition to the
+            clickable lock pills so the action is discoverable at a glance. */}
         {data && (
           <div style={{ padding: "10px 20px", borderBottom: "1px solid var(--line)", background: "var(--bg-soft)", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            {/* Free: must explicitly click to consume ticket */}
-            {pageHasLocks && data.policy.tier === "free" && (
+            {pageHasLocks && data.policy.tier === "free" && !data.policy.needsResume && (
               <button
                 className="btn primary"
-                onClick={() => unlockPage()}
+                onClick={handleLockClick}
                 disabled={unlocking}
                 style={{ fontSize: 13 }}
               >
-                {unlocking ? "解鎖中…" : "🔓 解鎖此頁分數（1 張解析券）"}
+                {unlocking
+                  ? "解鎖中…"
+                  : `🔓 解鎖此頁分數（${data.policy.ticketCost} 張解析券）`}
               </button>
             )}
-            {/* Pro past quota: locks appear, no manual unlock button — must wait next month or upgrade */}
             {pageHasLocks && data.policy.tier === "pro" && (
-              <span style={{ fontSize: 12, color: "oklch(45% .15 60)" }}>
-                ⚠️ 本月免費額度已用完（{data.policy.proUsage?.used ?? 0}/{data.policy.proUsage?.quota ?? 2}）
-              </span>
+              <button
+                className="btn"
+                onClick={handleLockClick}
+                style={{ fontSize: 12, color: "oklch(45% .15 60)" }}
+              >
+                ⚠️ 本月免費額度已用完（{data.policy.proUsage?.used ?? 0}/{data.policy.proUsage?.quota ?? 2}） · 查看選項
+              </button>
             )}
-            {/* Recalculate: Pro/Max only, when current page is all scored */}
             {everyJobScored && data.policy.canRecalculate && (
               <button
                 className="btn"
@@ -196,25 +238,64 @@ export function CompanyJobsModal({
           </div>
         )}
 
+        {/* Paid plan but no parsed resume → auto-score can't run. */}
+        {data?.policy.needsResume && (
+          <PromptBanner
+            kind="info"
+            title="尚未啟用自動評分"
+            body="自動評分需要已解析的履歷。請先到「履歷」頁上傳並完成解析後，回到此處即可看到每職缺的適配分數。"
+            primary={{ label: "前往「履歷」頁", href: "/resume" }}
+          />
+        )}
+
         {/* Prompt banners */}
         {prompt === "pro_quota_exceeded" && (
           <PromptBanner
             kind="warn"
             title="本月免費額度已用完"
-            body={`Pro 用戶每月每家公司前 2 頁分數免費。下次重置：${promptData.resetAt ?? "下月初"}。`}
-            primary={{ label: "🚀 升級 Max 立即解鎖", href: "/pricing" }}
+            body={`Pro 用戶每月每家公司前 2 頁分數免費。下次重置：${promptData.resetAt ?? "下月初"}。升級 Max 將按比例補本月差價、立即生效（即將開放，目前請於下月生效後使用）。`}
+            primary={{ label: "🚀 升級 Max", href: "/pricing" }}
             secondary={{ label: "等下個月", onClick: () => setPrompt(null) }}
           />
         )}
-        {prompt === "free_no_tickets" && (
-          <PromptBanner
-            kind="warn"
-            title="解析券不足"
-            body={`解鎖此頁需 1 張解析券，你目前有 ${promptData.tickets ?? 0} 張。看廣告或升級方案以繼續。`}
-            primary={{ label: "🚀 查看升級方案", href: "/pricing" }}
-            secondary={{ label: "我知道了", onClick: () => setPrompt(null) }}
-          />
-        )}
+        {/* Free clickable-lock entry — branches inside on tickets sufficiency. */}
+        {prompt === "unlock_confirm" && data && (() => {
+          const cost = data.policy.ticketCost;
+          const tickets = data.policy.tickets;
+          const hasEnough = tickets >= cost;
+          const adsLeft = data.policy.adSessionsLeft;
+          if (hasEnough) {
+            return (
+              <PromptBanner
+                kind="info"
+                title="解鎖此頁分數"
+                body={`使用 ${cost} 張解析券解鎖本頁 ${data.policy.pageSize} 個職缺的 AI 適配分數。你目前有 ${tickets} 張。`}
+                primary={{
+                  label: unlocking ? "解鎖中…" : `✅ 使用 ${cost} 張解析券解鎖`,
+                  onClick: () => unlockPage(),
+                }}
+                secondary={{ label: "取消", onClick: () => setPrompt(null) }}
+              />
+            );
+          }
+          // Tickets insufficient — offer ad-watch (if available) or upgrade.
+          const canWatchAd = AD_UNLOCK_ENABLED && adsLeft > 0;
+          return (
+            <PromptBanner
+              kind="warn"
+              title="解析券不足"
+              body={`解鎖此頁需 ${cost} 張解析券，你目前有 ${tickets} 張。${canWatchAd ? `可看廣告獲取（本月還能看 ${adsLeft} 次，每次 +1 張）。` : "本月已達廣告觀看上限。"}`}
+              primary={canWatchAd
+                ? { label: "📺 看廣告 +1 解析券", onClick: () => setShowAdWatcher(true) }
+                : { label: "🚀 升級方案", href: "/pricing" }
+              }
+              secondary={canWatchAd
+                ? { label: "升級方案", onClick: () => { window.location.href = "/pricing"; } }
+                : { label: "取消", onClick: () => setPrompt(null) }
+              }
+            />
+          );
+        })()}
         {prompt === "hash_unchanged" && (
           <PromptBanner
             kind="info"
@@ -223,6 +304,26 @@ export function CompanyJobsModal({
             primary={{ label: "前往「履歷」頁", href: "/resume" }}
             secondary={{ label: "了解", onClick: () => setPrompt(null) }}
           />
+        )}
+
+        {/* Ad watch overlay — completes by incrementing the user's ticket
+            balance on the server, then refetches modal data so the
+            unlock_confirm prompt flips from "insufficient" to "use ticket".
+            User must explicitly click the unlock button afterwards. */}
+        {showAdWatcher && (
+          <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.7)", zIndex: 400, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }}>
+            <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--bg-elev)", borderRadius: 12, maxWidth: 520, width: "100%", padding: 20 }}>
+              <AdWatcher
+                ticketCost={data?.policy.ticketCost ?? 1}
+                onComplete={() => {
+                  setShowAdWatcher(false);
+                  mutate();   // refetch — tickets now +1; prompt flips to "use ticket"
+                  globalMutate("/api/user/profile");
+                }}
+                onCancel={() => setShowAdWatcher(false)}
+              />
+            </div>
+          </div>
         )}
 
         {/* Job list — show ONE spinner during the whole load (Adzuna fetch +
@@ -252,6 +353,7 @@ export function CompanyJobsModal({
                   onSave={() => toggleSaved(j.id, savedIds.has(j.id))}
                   locked={j.locked}
                   staleScore={j.staleScore}
+                  onLockClick={j.locked ? handleLockClick : undefined}
                 />
               ))}
             </div>

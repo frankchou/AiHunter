@@ -188,6 +188,8 @@ STRIPE_MAX_PRICE_ID=price_...
 
 **Adzuna 錯誤恢復**：`adzunaCountOne` / `adzunaFetchCountry` 對 strict `company=` 查詢的**任何**錯誤（400/404/timeout/429/5xx）都會落到 `what_phrase=` fallback，不再因 status guard 提早回 0（修正 OpenAI 跨次刷新跳 0 的 bug）。
 
+**what_phrase 的 post-filter（避免徽章/列表落差）**：strict `company=` 失敗時，落到 `what_phrase=` 但**只計入** `display_name` 真的對應該公司的 row。沒有這個 post-filter，OpenAI 等 Adzuna 未索引的雇主會回 8979 筆「JD 提到 OpenAI」的職缺、但 modal 抓回的 `display_name` 都不是 OpenAI、DB 過濾後 0 列 → 徽章和清單對不上。現在 badge count 跟 modal 列表都用同一份 post-filter 結果（限制：fallback 取樣 50 筆，少數情況會略低估）。
+
 **Modal 內容**：分頁顯示（10 筆/頁），每筆用 JobCard 樣式，與職缺流卡片視覺一致。
 
 #### Per-user 評分（per-page 解鎖）
@@ -198,7 +200,16 @@ STRIPE_MAX_PRICE_ID=price_...
 | **Pro** | **每月每家公司前 2 頁免費**；超過 → 🔒 → 提示「升級 Max」或「等下月額度」（**不接受券支付**）|
 | **Max** | 無限解鎖、無限重新計算 |
 
-**「重新計算」按鈕**（僅 Pro/Max 顯示）：
+**鎖頭互動（per-row 點擊）**：
+- Free：點鎖頭 → 跳 `unlock_confirm` prompt → 內部依券庫狀態分流：
+  - 券數 ≥ `TICKET_COSTS.companyScoring` → 顯示「✅ 使用 N 張解析券解鎖」（按 = 扣券解鎖）
+  - 券數不足 + 本月廣告觀看次數 > 0 → 顯示「📺 看廣告 +1 解析券（本月剩 X 次）」→ 觀畢券庫 +1、prompt 自動 refetch policy → 按鈕翻回「使用 N 張解析券解鎖」**讓使用者再次主動點才扣券解鎖**（券到手與動用是兩步動作，UI 上不自動 retry）
+  - 券不足且廣告也用完 → 顯示「🚀 升級方案」
+- Pro 超出月配額（本月此公司 ≥ 2 頁）：點鎖頭 → 跳 `pro_quota_exceeded` prompt → 「等下月配額重置」或「升級 Max」（Max 變更生效時點請見計費段落）
+- Max / SuperUser：理論上不會有鎖頭（auto-score 涵蓋全部）；若因 race 出現，鎖頭點擊降回普通 unlock 流程
+- 任一 plan 但履歷沒解析（`policy.needsResume`）：顯示頂部 banner 提示前往「履歷」頁；鎖頭點擊不開 prompt（沒有任何分數能算）
+
+**「重新計算」按鈕**（僅 Pro/Max 顯示，且本頁所有 row 都有分數時才出現 — 空頁不顯示）：
 - 條件：當前 `Resume.parsedHash` ≠ 已評分的 `JobScore.parsedHash`
 - 若履歷沒新版本 → toast：「請先到「履歷」頁上傳新版」
 - 重算成本同初次解鎖（消耗 Pro 月度配額或 Max 免費）

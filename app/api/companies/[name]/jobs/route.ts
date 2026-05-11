@@ -3,7 +3,7 @@ import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { consumeCompanyScoring, getProMonthlyUsage } from "@/lib/billing";
-import { COMPANY_SCORING_PAGE_SIZE } from "@/lib/plans";
+import { COMPANY_SCORING_PAGE_SIZE, TICKET_COSTS, AD_UNLOCK_MONTHLY_CAP, currentMonth } from "@/lib/plans";
 import {
   countriesForRegion, fetchCompanyJobsPage, canonicalCompanyName,
   type AdzunaJobRow,
@@ -175,9 +175,18 @@ export async function GET(req: NextRequest, { params }: { params: { name: string
   // 3. Plan info — needed for auto-score eligibility
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
-    select: { planTier: true, isSuperUser: true, adTickets: true },
+    select: { planTier: true, isSuperUser: true, adTickets: true, adUnlocksUsed: true, usageMonth: true },
   });
   const tier = user?.isSuperUser ? "max" : (user?.planTier ?? "free");
+  // For the Free clickable-lock flow the modal needs to know up-front how
+  // many ad-watches are still available this month — so it can offer
+  // "看廣告獲取" instead of dead-ending when tickets run low.
+  const adSessionsLeft = (() => {
+    if (!user) return 0;
+    const month = currentMonth();
+    const effective = user.usageMonth === month ? user.adUnlocksUsed : 0;
+    return Math.max(0, AD_UNLOCK_MONTHLY_CAP - effective);
+  })();
   let proUsage = tier === "pro"
     ? await getProMonthlyUsage(session.user.id, companyName)
     : null;
@@ -297,6 +306,8 @@ export async function GET(req: NextRequest, { params }: { params: { name: string
       // rows render locked. Surface this so the modal can prompt instead of
       // showing a generic lock badge.
       needsResume:    tier !== "free" && !currentParsedHash,
+      ticketCost:     TICKET_COSTS.companyScoring,
+      adSessionsLeft,
     },
   });
 }
