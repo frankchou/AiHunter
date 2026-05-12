@@ -381,6 +381,8 @@ UI 動態：
 
 **計費**：無。Twinkle 目前 alpha 免費；Adzuna 路徑只讀我們自己的 Job 表，零外呼。未來資料源收費時，driver 抽象在 `lib/salary-sources/` 可換源（接主計處 CSV 等）。
 
+**Phase 3 待辦**：詳見 [SALARY_ROADMAP.md](./SALARY_ROADMAP.md)（A. 資料維度補完 / B. UX 工程優化 / C. 自評進階）。
+
 ---
 
 ### AI 共創履歷（Max 旗艦專屬）
