@@ -1,5 +1,7 @@
 import Link from "next/link";
 import { LogoMark } from "./LogoMark";
+import { JobCard } from "@/components/jobs/JobCard";
+import type { Job } from "@/lib/types";
 import "./landing.css";
 
 // Public marketing landing page. Visual language adapted from
@@ -82,37 +84,68 @@ function Hero() {
   );
 }
 
-// Stylized product-output preview — shows what AI Hunter actually
-// produces (a job card with AI match score + reasons). Static mock,
-// not real data.
+// Renders the REAL <JobCard /> component (same one used in the live
+// job feed) with mock data. Gives prospective users an honest preview
+// of what they'll see after signup — same visual language, same
+// score-pill styles, same tags. Wrapped in pointer-events:none so the
+// buttons don't take the user out of the landing flow.
+const HERO_MOCK_JOB: Job = {
+  id: "demo-1",
+  externalId: "demo",
+  title: "Senior Software Engineer",
+  company: "Google",
+  ticker: "GOOGL",
+  country: "TW",
+  city: "Taipei",
+  remote: "hybrid",
+  type: "Full-time",
+  salaryMin: 1_800_000,
+  salaryMax: 2_400_000,
+  ccy: "TWD",
+  yearsMin: 5,
+  yearsMax: 10,
+  industry: "tech.consumer",
+  skills: ["React", "Node.js", "TypeScript", "AWS", "Kubernetes"],
+  description: "We're looking for an experienced engineer to join our Cloud Platform team in Taipei...",
+  source: "adzuna",
+  sourceUrl: "#",
+  sourceHash: null,
+  postedAt: new Date(Date.now() - 3 * 60 * 60 * 1000),  // 3 hours ago
+  crawledAt: new Date(),
+  score: 0.92,
+  matchReasons: [
+    "履歷中的 React / Node 7 年經驗完全對應 JD 主要需求",
+    "期望薪資落在職缺範圍內、無預期落差",
+  ],
+};
+
 function HeroMockup() {
   return (
-    <div className="landing-mockup">
+    <div style={{
+      // Brutalist frame around the real card so the visual sits
+      // confidently in the hero — matches the rest of the landing.
+      border: "2px solid var(--ink)",
+      borderRadius: 18,
+      boxShadow: "8px 8px 0 0 var(--ink)",
+      padding: 18,
+      background: "var(--bg)",
+      position: "relative",
+      overflow: "hidden",
+    }}>
       <div className="landing-mockup-glow landing-mockup-glow-1" />
       <div className="landing-mockup-glow landing-mockup-glow-2" />
-      <div className="landing-mockup-head">
-        <div>
-          <div className="landing-mockup-title">Senior Software Engineer</div>
-          <div className="landing-mockup-co">Google · 台北 · 遠端可</div>
-        </div>
-        <div className="landing-mockup-score">92 分</div>
+      <div style={{
+        position: "absolute", top: 16, right: 16, zIndex: 2,
+      }}>
+        <span className="landing-pill landing-pill-soft">即時範例</span>
       </div>
-      <div className="landing-mockup-meta">
-        <span>💰 TWD 1.5M–2.4M / 年</span>
-        <span>·</span>
-        <span>🕐 3 小時前</span>
-      </div>
-      <div className="landing-mockup-reasons">
-        <div className="landing-mockup-reasons-title">AI 解析</div>
-        <ul>
-          <li>履歷中的 React / Node 7 年經驗，完全對應 JD 主要需求</li>
-          <li>薪資期望落在職缺範圍內，無預期落差</li>
-          <li className="warn">職缺要求 Kubernetes 經驗，履歷僅提到 Docker</li>
-        </ul>
-      </div>
-      <div className="landing-mockup-foot">
-        <div className="landing-mockup-btn">收藏</div>
-        <div className="landing-mockup-btn landing-mockup-btn-primary">立即投遞 →</div>
+      <div style={{ position: "relative", zIndex: 1, pointerEvents: "none" }}>
+        <JobCard
+          job={HERO_MOCK_JOB}
+          saved={false}
+          onSave={() => { /* preview only */ }}
+          reasonsLabel="AI 解析"
+        />
       </div>
     </div>
   );
