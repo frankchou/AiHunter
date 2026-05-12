@@ -496,3 +496,65 @@ UI 動態：
 - 版本夾頁面**沒有刪除按鈕**
 - A 履歷與 A CV 永不可刪
 - B 履歷、B CV 從對應職缺的 Prepare 頁刪除（連動清掉版本夾條目）
+
+---
+
+## 八、登入登出機制
+
+### 設計原則
+
+系統的登入入口**只有一個** = `/login` 頁面上的 Google 登入按鈕。所有「進系統」動線都收斂到這一個按鈕。
+
+| 公開頁面 | session 檢查 | 行為 |
+|---------|------------|-----|
+| `/` (首頁) | **不檢查** | 永遠 render LandingPage |
+| `/login` | **不檢查** | 永遠 render LoginPage |
+| `/plans` | **不檢查** | 公開方案頁 |
+
+> ⚠️ **禁止**在 `/` 或 `/login` 加 `getServerSession()` 然後自動跳 `/feed` 之類的「貼心邏輯」。會放大「假登出 → 被吸進系統」「假登入 → 沒反應」等 race condition。這條原則是 2026-05-12 那場 7 commit 連環 fix(auth) 撞牆換來的結論。
+
+### 登入流程
+
+1. 使用者在 `/login` 按「使用 Google 登入」
+2. `signIn("google", { callbackUrl: "/feed" })` → NextAuth POST `/api/auth/signin/google`
+3. NextAuth 設置 state / pkce cookie，回 Google OAuth URL
+4. 跳 Google → `prompt=select_account`（強制顯示帳號選擇）
+5. 回 `/api/auth/callback/google` → 驗證 state / pkce、交換 token、建 JWT session cookie
+6. 跳 `callbackUrl`（經 `lib/auth.ts` 的 `redirect` callback 處理，fallback 到 `/feed`）
+7. `(dashboard)/layout.tsx` 檢查 Resume + Preference → 有就 render，沒有就 redirect `/onboarding`
+
+### 登出流程
+
+任何登出按鈕（AppShell 頭像選單 / SettingsView 帳號區 / OnboardingFlow 頂列）一律呼叫：
+
+```ts
+signOut({ callbackUrl: "/login" })
+```
+
+NextAuth 標準 signOut 的行為：
+- POST `/api/auth/signout`（帶 csrf token）
+- 清 `session-token` cookie + 所有 chunked 部分（`.0`、`.1`…）
+- **保留 csrf-token cookie**（這是下次登入 CSRF 雙重提交配對所需）
+- redirect 到 callbackUrl（`/login`）
+
+### ⚠️ 禁止自家造 /api/logout
+
+NextAuth csrf 用 double-submit cookie pattern：cookie token 必須等於 POST body token。**官方 signOut 故意保留 csrf cookie** 就是為了下次登入時對得上。
+
+如果自家造 `/api/logout` 用 prefix pattern（`next-auth.*` / `__Secure-next-auth.*` / `__Host-next-auth.*`）一次清掉所有 NextAuth cookie，會**連 csrf-token 一起清掉**，後果：
+
+- SessionProvider 在 `/login` 上 polling `/api/auth/session` 偶爾 set 新 csrf cookie
+- signIn 內部呼叫 `/api/auth/providers` 跟 `/api/auth/csrf` 各自 set 新 csrf cookie
+- 多個來源時序不同步、跟 POST body token 對不上 → CSRF fail → 302 `/api/auth/signin?csrf=true` → 再 302 `/login?callbackUrl=絕對URL` → 卡死
+
+**現象指紋**：「狂按 8-9 次就可以了」「等一段時間再按又行了」這種 intermittent pattern 就是 race condition，**不是** Codespaces 限制（Vercel 上線後一樣會壞）。
+
+### 防護機制
+
+| 項目 | 實作 | 防什麼 |
+|------|------|--------|
+| `lib/auth.ts` 的 `redirect` callback | 同 origin URL 但 path 為 `/` 時 fallback `/feed` | callback cookie 在 Codespaces tunnel 偶發遺失時，使用者也不會被丟在 LandingPage |
+| `app/api/auth/[...nextauth]/route.ts` 加 `force-dynamic` | 強制動態 render | 防 csrf endpoint 被 Next.js Route Cache 偶發命中 |
+| `middleware.ts` 用 `withAuth` | 守 `/feed`、`/saved`、`/resume`、`/industry`、`/settings`、`/job` | 無 JWT 自動導 `/login` |
+| `(dashboard)/layout.tsx` | server-side 守門 + 履歷/preference 檢查 | 雙保險，且把履歷檢查跟 session 檢查解耦 |
+| `app/api/auth/[...nextauth]/route.ts` 跟 `lib/auth.ts` 都不暴露 NEXTAUTH_SECRET | secret 走 env var | JWT 簽章用 |

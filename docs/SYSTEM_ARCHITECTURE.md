@@ -356,6 +356,48 @@ model CancellationFeedback {
 
 ## 核心資料流
 
+### 登入登出流程
+
+```
+[登入] — 唯一入口：/login 上的 Google 按鈕
+LoginPage Google 按鈕
+    ↓ signIn("google", { callbackUrl: "/feed" })
+POST /api/auth/signin/google
+    ├─ NextAuth init：CSRF 驗證、生成 state/pkce cookie
+    └─ 回 Google OAuth URL
+    ↓
+Google (prompt=select_account)
+    ↓
+GET /api/auth/callback/google?code=…&state=…
+    ├─ checks.state.use     ← 驗 state cookie（驗完清掉）
+    ├─ checks.pkce.use      ← 驗 PKCE cookie（驗完清掉）
+    ├─ token exchange + id_token claims
+    ├─ JWT encode → Set-Cookie session-token（可能 chunked）
+    └─ redirect（經 lib/auth.ts redirect callback，fallback /feed）
+    ↓
+GET /feed → (dashboard)/layout.tsx
+    ├─ getServerSession() 驗 JWT
+    └─ Resume + Preference 雙檢
+        ├─ 兩個都有 → render /feed
+        └─ 缺其一  → redirect /onboarding
+
+[登出] — 任何登出按鈕都走這條
+AppShell / SettingsView / OnboardingFlow 登出按鈕
+    ↓ signOut({ callbackUrl: "/login" })
+POST /api/auth/signout（帶 csrf token）
+    ├─ Set-Cookie 清 session-token + 所有 chunks
+    └─ **保留 csrf-token cookie**（這條是關鍵，下次登入 CSRF 配對用）
+    ↓
+window.location = /login
+
+[Session 過期 — 另一個 tab 登出 / JWT maxAge 到期]
+AppShell useEffect: status === "unauthenticated"
+    ↓ window.location.href = "/login"
+（不呼叫 signOut() — session 已死、不需 POST signout 端點）
+```
+
+> ⚠️ **禁止自家造 /api/logout endpoint**。NextAuth 標準 signOut() 故意保留 csrf-token cookie 是為了避免 race。自家清掉所有 NextAuth-prefix cookie 會在下次登入時造成 CSRF mismatch race（「狂按 8-9 次才行」這種 intermittent pattern）。詳見 [SYSTEM_MECHANISM.md 八、登入登出機制](./SYSTEM_MECHANISM.md)。
+
 ### AI 功能執行流程
 
 ```
@@ -619,7 +661,10 @@ client useMemo 即時：
 
 | 項目 | 實作方式 |
 |------|---------|
-| 路由保護 | getServerSession() 在每個 API route |
+| 路由保護 | getServerSession() 在每個 API route + `middleware.ts` 用 `withAuth` 守 dashboard 路由群 |
+| 登入登出鏈 | 一律走 NextAuth 標準 `signIn()` / `signOut()`，**禁止** 自家造 /api/logout（會清 csrf cookie 造成 race） |
+| NextAuth catch-all 防快取 | `app/api/auth/[...nextauth]/route.ts` 設 `export const dynamic = "force-dynamic"` |
+| 首頁/登入頁與 session 解耦 | `/`、`/login` 永遠不 check session，避免 race 放大為「假登出/假登入」 |
 | Super User bypass | `User.isSuperUser=true`（DB 欄位，非環境變數）|
 | Stripe Webhook | stripe.webhooks.constructEvent()（簽名驗證）|
 | 廣告解鎖防刷 | 服務端 adUnlocksUsed 月度計數（max 5）|
