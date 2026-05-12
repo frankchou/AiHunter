@@ -47,6 +47,8 @@ AiHunter/
 │   │   ├── stocks/            # 即時股價（GET，5 分鐘快取）
 │   │   ├── ads/
 │   │   │   └── unlock/        # 廣告解鎖（POST）
+│   │   ├── salary/            # 薪資查詢（GET，全 plan 免費，不過 gate）
+│   │   │                       #   TW: Twinkle Hub → 勞動部；外國: Adzuna 既有 Job 表彙整
 │   │   ├── chat/
 │   │   │   └── threads/         # AI 共創履歷對話 thread + message + apply（Max only）
 │   │   ├── stripe/
@@ -78,6 +80,9 @@ AiHunter/
 │   ├── cocreate/
 │   │   ├── CoCreateButton.tsx # 右下浮動按鈕（Max-only）
 │   │   └── CoCreatePanel.tsx  # 共創對話面板（桌機側拉 / 手機全螢幕 sheet）
+│   ├── salary/
+│   │   └── SalaryView.tsx     # 薪資查詢頁（國家 chip / 產業 chip / Adzuna filter / 自評輸入；
+│   │                          #   self-eval 純前端算，避免每打一字 refetch）
 │   ├── subscription/
 │   │   ├── AdWatcher.tsx       # 廣告觀看元件（3 則序列）
 │   │   ├── PricingView.tsx     # 方案選擇頁（含取消/降級按鈕；TWD 顯示）
@@ -95,12 +100,19 @@ AiHunter/
 │   ├── prisma.ts              # Prisma 客戶端（singleton）
 │   ├── auth.ts                # NextAuth 設定
 │   ├── utils.ts               # 工具函式
-│   └── ai/
-│       ├── insights.ts        # 職缺深度分析 AI
-│       ├── cv-tailor.ts       # CV 客製 AI
-│       ├── resume-parser.ts   # 履歷解析 AI
-│       ├── resume-analyzer.ts # 履歷 SWOT 分析 AI
-│       └── match.ts           # 職缺評分 AI
+│   ├── ai/
+│   │   ├── insights.ts        # 職缺深度分析 AI
+│   │   ├── cv-tailor.ts       # CV 客製 AI
+│   │   ├── resume-parser.ts   # 履歷解析 AI
+│   │   ├── resume-analyzer.ts # 履歷 SWOT 分析 AI
+│   │   └── match.ts           # 職缺評分 AI
+│   └── salary-sources/        # 薪資資料 driver 層（每個源獨立檔案）
+│       ├── industry-mapping.ts # 我們 37 產業 → 政府 17 行業大類對照
+│       ├── twinkle.ts         # Twinkle Hub / 勞動部 抓取 + 加權平均
+│       ├── adzuna-aggregate.ts # 從 Job 表彙整 P25/P50/P75（FX→TWD、剔異常值）
+│       └── company-types.ts   # 6 個 CompanyType bucket + zh-TW label
+├── scripts/
+│   └── seed-company-classifications.mjs # 公司分類種子（209 間，可擴充）
 ├── prisma/
 │   └── schema.prisma          # 資料庫 Schema
 └── docs/
@@ -249,6 +261,34 @@ model FinancialsCache {
 ```
 
 > 由 `/api/financials` 寫入，IndustryView 展開行時透過 SWR 讀取。
+
+### SalaryCache（薪資查詢的 Twinkle Hub 結果快取）
+
+```prisma
+model SalaryCache {
+  id        String   # cuid
+  datasetId String   # 政府資料集 ID（41685, 41692, ...）
+  year      String   # 西元年（"2024"）
+  data      Json     # SalarySnapshot（rows + meta）
+  createdAt DateTime
+  @@unique([datasetId, year])
+}
+```
+
+> TTL 7 天；同產業重複查詢直接讀。Twinkle Alpha 階段免費但避免重複呼叫。
+
+### CompanyClassification（公司類別對照表 — Phase 2）
+
+```prisma
+model CompanyClassification {
+  companyName String   # primary key；與 Adzuna `display_name` 大小寫不敏感 contains 比對
+  companyType String   # foreign_tier1 | foreign_traditional | tw_local
+                       # large_enterprise | sme | startup
+  region      String?  # 國家代碼（"US", "TW", "JP" 等，提供顯示用，非過濾依據）
+}
+```
+
+> 由 [scripts/seed-company-classifications.mjs](../scripts/seed-company-classifications.mjs) 一次 seed 209 間。`/api/salary` 外國 mode 帶 `companyType` 時，先查此表撈 company name 集合、再 OR-IN 進 Job 查詢。為 Adzuna 「不索引此雇主」修補：seed 同一公司可加多筆別名（`Google` + `Alphabet` / `Meta` + `Facebook`）。
 
 ### ResumeChat / ResumeChatMessage（AI 共創對話 + 提案，Max only）
 

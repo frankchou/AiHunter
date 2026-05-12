@@ -350,3 +350,16 @@ model SalaryCache {
 
   @@unique([datasetId, year])
 }
+
+// Phase 2 of /salary — classifies known employers into the 6 buckets
+// the user wants to filter by (傳統外商 / Tier-1 外商 / 台商 / 大企業
+// / 中小企業 / 新創). Joined to Job.company at query time via
+// case-insensitive contains match on companyName.
+model CompanyClassification {
+  id          String   @id @default(cuid())
+  companyName String   @unique     // canonical match key against Job.company
+  companyType String                // foreign_tier1 | foreign_traditional | tw_local | large_enterprise | sme | startup
+  region      String?               // optional headquarters / primary market
+  notes       String?
+  createdAt   DateTime @default(now())
+}

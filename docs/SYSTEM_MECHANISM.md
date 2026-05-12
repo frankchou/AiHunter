@@ -275,28 +275,82 @@ STRIPE_MAX_PRICE_ID=price_...
 
 ---
 
-### 薪資查詢（Phase 1 — TW 政府公開資料）
+### 薪資查詢（Phase 1 + Phase 2）
 
 左側 sidebar 「薪資查詢」（💰），全 plan 免費、不過 billing gate、不打 AI。
+
+**架構（driver 層）**：`lib/salary-sources/` 抽掉資料源細節 — `twinkle.ts`（TW gov）與 `adzuna-aggregate.ts`（海外）各自實作；`/api/salary` route 根據 `country` 參數 dispatch。
+
+#### Phase 1 — TW 政府公開資料
 
 **資料來源**：[Twinkle Hub](https://hub.twinkleai.tw/)（MCP / JSON-RPC 2.0）→ 勞動部「受僱員工人數、每人薪資-XX業（按職類別分）」資料集（41685–41700 共 17 個產業 dataset）。每年 7 月更新。
 
 **對照**：我們的 37 個內部產業 → 政府 17 個行業大類的 mapping 在 `lib/salary-sources/industry-mapping.ts`。少數產業（agriculture / government）對應到 null，UI 顯示「Phase 2 才會接 Adzuna 海外資料」placeholder。
 
 **運作流程**：
-1. 使用者在 `/salary` 選一個產業 chip
-2. `/api/salary?industry=X` 經 `SalaryCache`（7 天 TTL）→ 沒命中再打 Twinkle 的 `opendata-query_rows`
+1. 使用者在 `/salary` 選國家 = TW + 一個產業 chip
+2. `/api/salary?country=TW&industry=X` 經 `SalaryCache`（7 天 TTL）→ 沒命中再打 Twinkle 的 `opendata-query_rows`
 3. Twinkle 回傳當年度全部 rows（依「行業別」分 sub-industry）
 4. Driver 以「職類別」聚合、員工數加權平均成 1 列 / 1 職類
-5. 回 `summary`（產業整體加權平均月薪 / 年薪 / 樣本總數）+ `rows`（各職類）+ 可選 `selfEval`（使用者輸入 vs 平均落差 %）
+5. 回 `summary`（產業整體加權平均月薪 / 年薪 / 樣本總數）+ `rows`（各職類）
 
-**Phase 1 範圍 vs 還缺**：
-- ✅ 產業 × 職類別 → 月薪 + 年薪 + 員工數
-- ✅ 自評落點（相對平均 ±X%）
-- ❌ P25/P50/P75 百分位（政府只給平均）
-- ❌ 海外國家、企業類型（6 類）、年資分群 — Phase 2 接 Adzuna 補
+#### Phase 2 — 海外 Adzuna 彙整
 
-**計費**：無。Twinkle 目前 alpha 免費（無 rate limit、只有 `max_budget` 防呆）。未來他們收費時，driver 抽象在 `lib/salary-sources/` 可換源（接主計處 CSV 等）。
+**資料來源**：我們自己的 Job 表中 `source="adzuna"` 的列（由 Top 20 + job-feed pipeline 寫入）。換句話說：**不再額外打 Adzuna**，純粹彙整既有資料。
+
+**驅動方式**：`/api/salary?country=US&industry=X&companyType=Y&experience=Z` →
+1. `buildJobWhere`：`source:"adzuna"` + `country IN COUNTRY_TO_ADZUNA[country]` + `salary>0` + 可選 `companyType`（先查 `CompanyClassification` 撈公司名集合，再 OR `company contains`）+ 可選 `experience`（用 `Job.yearsMin/yearsMax` overlap 算）。
+2. `prisma.job.findMany`（最多 5000 筆 salary 欄）。
+3. 每列取 (min, max) midpoint，按 `FX_TO_TWD` 換 TWD/年；剔 <100k 或 >30M 的離群（多半是 Adzuna 單位混淆）。
+4. sort → 算 P25 / P50 / P75 / mean。
+5. 回 `summary` + per-mode `source.note`（誠實標註：是雇主開價、不是員工實得；年資為職缺要求年資，非實際工作年資）。
+
+**支援的國家**：
+
+| 國家 | mode | 備註 |
+|---|---|---|
+| TW | tw_gov | Phase 1 路徑（政府資料） |
+| US | adzuna | Adzuna US 國家標籤；樣本足夠 |
+| UK | adzuna | Adzuna GB 國家標籤 |
+| AU | adzuna | Adzuna AU 國家標籤 |
+| EU | adzuna | 合成 DE/FR/NL/ES/IT/PL；Adzuna 歐洲 per-country 不均 |
+| JP / KR / CN | disabled | UI chip 灰，點選後顯示「資料尚未開放」卡 |
+
+**JP/KR/CN 的真實狀況**（不是「完全沒資料」）：Adzuna **per-country** 端點對日韓中近乎零，所以我們的 Job 表用 `country=JP` 撈不到東西。但 Top 20 + job-feed 從 US/UK/EU 抓的職缺中，**確實有亞洲總部公司的海外職位**（如 MediaTek 美國 office、Sony US 職位）— 這些已被算進其對應的駐在國（US/UK/EU）薪資池，不是「JP 在地薪資」。
+
+**前端互動 vs 不閃**：UI 把 `userMonthly` / `userAnnual` 完全留在前端，self-eval 用 `useMemo` 即時算。SWR fetch key 只跟 (country, industry, occupation, companyType, experience) 走 → 打數字不會觸發 refetch，不會閃。
+
+**6 個 CompanyType bucket**：
+
+| key | 中文 | 範例 |
+|---|---|---|
+| `foreign_tier1` | Tier-1 外商 | FAANG、NVIDIA、ASML、OpenAI、Anthropic |
+| `foreign_traditional` | 傳統外商 | IBM / Oracle / SAP / Big-4 / CPG |
+| `tw_local` | 台商 | TSMC、Foxconn、MTK、Acer、Appier、iKala |
+| `large_enterprise` | 大企業（其他） | Yahoo, Stripe-tier 非 Tier-1 大廠 |
+| `sme` | 中小企業 | Notion / Figma / Linear / Vercel |
+| `startup` | 新創 | Cohere / Perplexity / Cursor / Scale AI |
+
+**Seed**：[scripts/seed-company-classifications.mjs](../scripts/seed-company-classifications.mjs) 一次 upsert **209 間**（初版；隨 Adzuna 看到的雇主擴張）。同一公司多筆別名容許（`Google` + `Alphabet`），用 `companyName` 唯一鍵 upsert。
+
+**5 段年資 bucket**：`exp_0`（應屆）/ `exp_1_3` / `exp_3_7` / `exp_7_10` / `exp_10p`，比對 `Job.yearsMin/yearsMax` 與 bucket 區間是否有 overlap。
+
+**FX 換算**：`FX_TO_TWD` 寫死於 [adzuna-aggregate.ts](../lib/salary-sources/adzuna-aggregate.ts)；USD=32 / GBP=40.5 / EUR=35 / AUD=21 / JPY=0.21 等。匯率漂移 >10% 時手動更新。
+
+**自評百分位估計**：從前端拿 P25/P50/P75 三點線性插值，外推時 cap 在 100。這是粗估，UI 標「約 PXX」非精確值。
+
+#### Phase 1 vs Phase 2 範圍對照
+
+| 維度 | Phase 1 (TW gov) | Phase 2 (Adzuna) | 待補（Phase 3）|
+|---|---|---|---|
+| 產業 × 職類別 | ✅ | ⚠️ 無職類欄（Adzuna title 自由文字） | AI 分類職缺 title |
+| 平均 / 中位數 | 僅平均 | P25/P50/P75 + mean | — |
+| 國家 | TW only | US/UK/AU/EU；JP/KR/CN 灰 | 接 LinkedIn / 在地求職平台 |
+| 企業類型（6 類）| 政府無此欄 | ✅（透過 CompanyClassification） | — |
+| 年資 | 政府無此欄 | ✅（職缺要求年資 proxy） | 履歷實際年資 |
+| 證照 / 作品 / 學歷 | — | — | 由 AI 解析履歷推估 |
+
+**計費**：無。Twinkle 目前 alpha 免費；Adzuna 路徑只讀我們自己的 Job 表，零外呼。未來資料源收費時，driver 抽象在 `lib/salary-sources/` 可換源（接主計處 CSV 等）。
 
 ---
 
