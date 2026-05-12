@@ -24,6 +24,7 @@ const NAV: NavItemWithFlags[] = [
   { id: "resume",   href: "/resume",   label: "履歷",           icon: "📄" },
   { id: "resumes",  href: "/resumes",  label: "履歷版本",       icon: "📁", maxOnly: true },
   { id: "industry", href: "/industry", label: "產業 Top 20",    icon: "🏢" },
+  { id: "salary",   href: "/salary",   label: "薪資查詢",       icon: "💰" },
   { id: "pricing",  href: "/pricing",  label: "升級方案",       icon: "🚀", hideForMax: true },
   { id: "settings", href: "/settings", label: "設定",           icon: "⚙" },
 ];

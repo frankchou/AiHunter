@@ -275,6 +275,31 @@ STRIPE_MAX_PRICE_ID=price_...
 
 ---
 
+### 薪資查詢（Phase 1 — TW 政府公開資料）
+
+左側 sidebar 「薪資查詢」（💰），全 plan 免費、不過 billing gate、不打 AI。
+
+**資料來源**：[Twinkle Hub](https://hub.twinkleai.tw/)（MCP / JSON-RPC 2.0）→ 勞動部「受僱員工人數、每人薪資-XX業（按職類別分）」資料集（41685–41700 共 17 個產業 dataset）。每年 7 月更新。
+
+**對照**：我們的 37 個內部產業 → 政府 17 個行業大類的 mapping 在 `lib/salary-sources/industry-mapping.ts`。少數產業（agriculture / government）對應到 null，UI 顯示「Phase 2 才會接 Adzuna 海外資料」placeholder。
+
+**運作流程**：
+1. 使用者在 `/salary` 選一個產業 chip
+2. `/api/salary?industry=X` 經 `SalaryCache`（7 天 TTL）→ 沒命中再打 Twinkle 的 `opendata-query_rows`
+3. Twinkle 回傳當年度全部 rows（依「行業別」分 sub-industry）
+4. Driver 以「職類別」聚合、員工數加權平均成 1 列 / 1 職類
+5. 回 `summary`（產業整體加權平均月薪 / 年薪 / 樣本總數）+ `rows`（各職類）+ 可選 `selfEval`（使用者輸入 vs 平均落差 %）
+
+**Phase 1 範圍 vs 還缺**：
+- ✅ 產業 × 職類別 → 月薪 + 年薪 + 員工數
+- ✅ 自評落點（相對平均 ±X%）
+- ❌ P25/P50/P75 百分位（政府只給平均）
+- ❌ 海外國家、企業類型（6 類）、年資分群 — Phase 2 接 Adzuna 補
+
+**計費**：無。Twinkle 目前 alpha 免費（無 rate limit、只有 `max_budget` 防呆）。未來他們收費時，driver 抽象在 `lib/salary-sources/` 可換源（接主計處 CSV 等）。
+
+---
+
 ### AI 共創履歷（Max 旗艦專屬）
 
 **入口**：右下角浮動 ✨ 按鈕，僅 Max 看得到。出現於 `/resume`、`/job/[id]` 等頁面。
