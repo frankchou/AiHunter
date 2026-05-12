@@ -1,6 +1,6 @@
 "use client";
 import { useState, useEffect } from "react";
-import { useSession } from "next-auth/react";
+import { useSession, signOut } from "next-auth/react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
 import useSWR from "swr";
@@ -36,13 +36,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [accountMenu, setAccountMenu] = useState(false);
   const { data: session, status } = useSession();
 
-  // Session expired in another tab / on the server. Send the browser
-  // through /api/logout so cookies get the same definitive wipe as a
-  // manual logout — never call NextAuth's signOut() directly, that
-  // path doesn't clear chunked or OAuth-flow cookies.
+  // Session expired in another tab / on the server (e.g. JWT past maxAge).
+  // Session is already dead — no need to POST signout, just navigate to
+  // /login. Calling signOut() here would 500-loop if the csrf endpoint
+  // also can't see a session.
   useEffect(() => {
     if (status === "unauthenticated") {
-      window.location.href = "/api/logout";
+      window.location.href = "/login";
     }
   }, [status]);
 
@@ -130,7 +130,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   style={{ display: "block", padding: "9px 12px", fontSize: 13, color: "var(--ink)" }}>
                   設定
                 </Link>
-                <button onClick={() => { setAccountMenu(false); window.location.href = "/api/logout"; }}
+                <button onClick={() => { setAccountMenu(false); signOut({ callbackUrl: "/login" }); }}
                   style={{ display: "block", width: "100%", textAlign: "left", padding: "9px 12px", background: "none", border: "none", borderTop: "1px solid var(--line)", fontFamily: "inherit", fontSize: 13, cursor: "pointer", color: "var(--ink)" }}>
                   登出
                 </button>

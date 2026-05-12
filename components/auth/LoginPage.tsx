@@ -32,15 +32,7 @@ export function LoginPage() {
           </div>
 
           <button
-            onClick={async () => {
-              // Wipe any lingering NextAuth state before kicking off OAuth.
-              // Without this, NextAuth's signin endpoint sees a half-stale
-              // session cookie and short-circuits to callbackUrl WITHOUT
-              // doing OAuth — that's the "silent re-login" / "URL bounces
-              // to /login?callbackUrl=..." pattern in Codespaces.
-              await fetch("/api/logout", { redirect: "manual", credentials: "include" }).catch(() => {});
-              signIn("google", { callbackUrl: "/feed" });
-            }}
+            onClick={() => signIn("google", { callbackUrl: "/feed" })}
             style={{
               width: "100%", display: "flex", alignItems: "center", justifyContent: "center",
               gap: 10, padding: "11px 16px", borderRadius: 8,

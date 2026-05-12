@@ -2,6 +2,11 @@ import { NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 
 export const authOptions: NextAuthOptions = {
+  // Always print NextAuth's internal logs to the dev server console.
+  // Costs nothing in production (logs go to stdout); makes debugging
+  // future auth-rail issues trivial — without this, csrf/state/pkce
+  // failures are silent.
+  debug: true,
   providers: [
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID!,
