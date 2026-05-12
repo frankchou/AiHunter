@@ -520,6 +520,39 @@ PlanChangeModal 開啟 — Step 1: Impact 警告
     當期結束 → Stripe webhook → user.planTier 更新
 ```
 
+### 薪資查詢流程（Phase 1 + Phase 2，client-side filter）
+
+```
+進 /salary
+    ↓
+選國家 chip + 選產業 chip（兩者皆必填）
+    ↓
+GET /api/salary?country=X&industry=Y          ← 不過 billing gate、不打 AI
+    ├─ JP / KR / CN → 回 hasData:false + "資料尚未開放"
+    ├─ TW (gov 路徑):
+    │     ├─ INDUSTRY_TO_DATASET[Y] → datasetId
+    │     ├─ SalaryCache(datasetId, year) 7 天 TTL → 命中讀；miss 打 Twinkle Hub
+    │     ├─ Twinkle MCP / JSON-RPC 2.0 → 勞動部 rows
+    │     └─ 回 { rows: TwGovRow[], summary: 加權平均 }
+    └─ Foreign (Adzuna 路徑):
+          ├─ 載入全部 CompanyClassification (~209 rows)
+          ├─ prisma.job.findMany ({ source:"adzuna", country IN [...], industry, salary>0 })  take 5000
+          ├─ 每列 FX→TWD + 預分類 companyType + 剔離群（<100k 或 >30M）
+          └─ 回 { rows: SalaryJobRow[] }  ← 不算 summary，交給 client
+    ↓
+SWR 收 rows（cache key 只跟 country/industry 走）
+    ↓
+[使用者操作] 改 filter / 改幣別 / 打輸入框數字 → NOT REFETCH
+    ↓
+client useMemo 即時：
+    ├─ adzunaFiltered = rows.filter(companyType + experience + titleQuery)
+    ├─ adzunaSummary  = P25/P50/P75/mean from adzunaFiltered
+    ├─ localSelfEval  = user(monthly,annual) × FX_TO_TWD[currency] → 比 P50 → 百分位插值
+    └─ 全部瞬間反映 UI
+```
+
+**架構決策**：Server 薄、Client 厚。SWR key 故意只含 `(country, industry, occupation)`；filter / 幣別 / salary input 全留前端 `useMemo` 算 → 切 filter 不打 API、不 spinner、不 flicker。代價是 response ~100-300KB（每 row ~50 bytes × 1000-5000 rows），但只在切國家 / 產業時拉一次，划得來。
+
 ---
 
 ## AI 模型使用
