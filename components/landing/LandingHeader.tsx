@@ -1,4 +1,6 @@
+"use client";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { Logo } from "@/components/ui/Logo";
 
 // Sticky public-facing header shared by LandingPage / PlansPage / LoginPage.
@@ -14,6 +16,20 @@ interface Props {
   hideAuth?: boolean;
 }
 export function LandingHeader({ hideAuth = false }: Props) {
+  const pathname = usePathname();
+  const isHome = pathname === "/";
+
+  // On the landing page, "功能" is a same-page anchor — intercept the
+  // click and trigger a smooth scroll. On every other page (/plans,
+  // /login, …) let Next.js's <Link> route to /#features as a normal
+  // cross-page navigation; the browser jumps to the anchor instantly
+  // after the new page mounts, which is what the user asked for.
+  const onFeaturesClick = (e: React.MouseEvent) => {
+    if (!isHome) return;
+    e.preventDefault();
+    document.getElementById("features")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   return (
     <header className="landing-header">
       <div className="landing-container landing-header-inner">
@@ -23,7 +39,7 @@ export function LandingHeader({ hideAuth = false }: Props) {
         </Link>
         <nav className="landing-nav">
           <Link href="/">首頁</Link>
-          <Link href="/#features">功能</Link>
+          <Link href="/#features" onClick={onFeaturesClick}>功能</Link>
           <Link href="/plans">方案</Link>
         </nav>
         <div style={{ flex: 1 }} />
