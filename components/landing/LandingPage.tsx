@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { LogoMark } from "./LogoMark";
 import "./landing.css";
 
 // Public marketing landing page. Visual language adapted from
@@ -27,7 +28,7 @@ function Header() {
     <header className="landing-header">
       <div className="landing-container landing-header-inner">
         <Link href="/" className="landing-logo">
-          <span className="landing-logo-mark">AI</span>
+          <LogoMark size={34} />
           AI Hunter
         </Link>
         <nav className="landing-nav">
@@ -47,30 +48,73 @@ function Header() {
 function Hero() {
   return (
     <section className="landing-hero">
-      <div className="landing-container" style={{ textAlign: "center" }}>
-        <div className="landing-rise landing-rise-1">
-          <span className="landing-eyebrow">
-            <span className="landing-dot" />
-            AI 求職新體驗 · 2026
-          </span>
-        </div>
-        <h1 className="landing-h1 landing-rise landing-rise-2">
-          找下一份工作，<br />
-          交給 <span className="landing-highlight">AI Hunter</span> 一條龍。
-        </h1>
-        <p className="landing-hero-sub landing-rise landing-rise-3">
-          上傳履歷，30 秒看到每個職缺的適配分數。<br />
-          客製履歷、洞察 37 個產業頂尖雇主，全部一次到位。
-        </p>
-        <div className="landing-hero-ctas landing-rise landing-rise-4">
-          <Link href="/login" className="landing-btn-primary">免費註冊 →</Link>
-          <Link href="/pricing" className="landing-btn-outline">看方案</Link>
-        </div>
-        <div className="landing-hero-reassure landing-rise landing-rise-4">
-          完全免費上手 · 無需信用卡 · 隨時可升級
+      <div className="landing-container">
+        <div className="landing-hero-grid">
+          <div className="landing-hero-text">
+            <div className="landing-rise landing-rise-1">
+              <span className="landing-eyebrow">
+                <span className="landing-dot" />
+                AI 求職新體驗 · 2026
+              </span>
+            </div>
+            <h1 className="landing-h1 landing-rise landing-rise-2">
+              找下一份工作，<br />
+              交給 <span className="landing-highlight">AI Hunter</span>。
+            </h1>
+            <p className="landing-hero-sub landing-rise landing-rise-3">
+              上傳履歷，30 秒看到每個職缺的適配分數。<br />
+              客製履歷、洞察 37 個產業頂尖雇主，全部一次到位。
+            </p>
+            <div className="landing-hero-ctas landing-rise landing-rise-4">
+              <Link href="/login" className="landing-btn-primary">免費註冊 →</Link>
+              <Link href="/pricing" className="landing-btn-outline">看方案</Link>
+            </div>
+            <div className="landing-hero-reassure landing-rise landing-rise-4">
+              完全免費上手 · 無需信用卡 · 隨時可升級
+            </div>
+          </div>
+          <div className="landing-rise landing-rise-3">
+            <HeroMockup />
+          </div>
         </div>
       </div>
     </section>
+  );
+}
+
+// Stylized product-output preview — shows what AI Hunter actually
+// produces (a job card with AI match score + reasons). Static mock,
+// not real data.
+function HeroMockup() {
+  return (
+    <div className="landing-mockup">
+      <div className="landing-mockup-glow landing-mockup-glow-1" />
+      <div className="landing-mockup-glow landing-mockup-glow-2" />
+      <div className="landing-mockup-head">
+        <div>
+          <div className="landing-mockup-title">Senior Software Engineer</div>
+          <div className="landing-mockup-co">Google · 台北 · 遠端可</div>
+        </div>
+        <div className="landing-mockup-score">92 分</div>
+      </div>
+      <div className="landing-mockup-meta">
+        <span>💰 TWD 1.5M–2.4M / 年</span>
+        <span>·</span>
+        <span>🕐 3 小時前</span>
+      </div>
+      <div className="landing-mockup-reasons">
+        <div className="landing-mockup-reasons-title">AI 解析</div>
+        <ul>
+          <li>履歷中的 React / Node 7 年經驗，完全對應 JD 主要需求</li>
+          <li>薪資期望落在職缺範圍內，無預期落差</li>
+          <li className="warn">職缺要求 Kubernetes 經驗，履歷僅提到 Docker</li>
+        </ul>
+      </div>
+      <div className="landing-mockup-foot">
+        <div className="landing-mockup-btn">收藏</div>
+        <div className="landing-mockup-btn landing-mockup-btn-primary">立即投遞 →</div>
+      </div>
+    </div>
   );
 }
 
@@ -276,7 +320,7 @@ function SiteFooter() {
         <div className="landing-footer-grid">
           <div>
             <div className="landing-logo" style={{ color: "var(--bg)" }}>
-              <span className="landing-logo-mark">AI</span>
+              <LogoMark size={32} />
               AI Hunter
             </div>
             <p style={{ marginTop: 14, fontSize: 14, color: "#9ca3af", lineHeight: 1.65, maxWidth: 320 }}>
