@@ -8,7 +8,7 @@ import "@/components/landing/landing.css";
 export function LoginPage() {
   return (
     <div className="landing" style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
-      <LandingHeader compact />
+      <LandingHeader compact hideAuth />
       <main style={{
         flex: 1,
         display: "flex", alignItems: "center", justifyContent: "center",
