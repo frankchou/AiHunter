@@ -22,6 +22,14 @@ interface Props {
   reasonsLabel?: string;
 }
 
+// Quick heuristic to pick ✓ vs ! for each match reason. AI output today
+// is plain strings (no kind tag), so we sniff for negative-vibe Chinese
+// phrases. False positives are mostly harmless — a "✓" on a borderline
+// reason just looks like neutral encouragement.
+function isWarnReason(text: string): boolean {
+  return /不匹配|不符|不足|落差|缺少|不夠|未具備|未提及|未涵蓋|超出|未達|風險|警示|建議補強|缺乏|可能無法|差距|不在/.test(text);
+}
+
 function ScorePill({ score, locked, staleScore, onLockClick }: { score: number | null; locked?: boolean; staleScore?: boolean; onLockClick?: () => void }) {
   if (locked) {
     const label = "🔒 鎖定";
@@ -80,7 +88,14 @@ export function JobCard({ job, saved, onSave, locked, staleScore, onLockClick, r
           <span>🕐 {relativeTime(job.postedAt ?? null)}</span>
         </div>
         {job.matchReasons.length > 0 && (
-          <div className="match-reasons">{reasonsLabel}: {job.matchReasons.slice(0, 2).join(" · ")}</div>
+          <div className="match-reasons">
+            <div className="match-reasons-label">{reasonsLabel}</div>
+            <ul className="match-reasons-list">
+              {job.matchReasons.slice(0, 4).map((r, i) => (
+                <li key={i} className={isWarnReason(r) ? "warn" : ""}>{r}</li>
+              ))}
+            </ul>
+          </div>
         )}
         <div className="job-tags">
           {job.skills.slice(0, 5).map((s) => <span key={s} className="tag">{s}</span>)}
