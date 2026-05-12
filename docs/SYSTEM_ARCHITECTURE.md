@@ -294,7 +294,7 @@ model CompanyClassification {
 }
 ```
 
-> 由 [scripts/seed-company-classifications.mjs](../scripts/seed-company-classifications.mjs) 一次 seed 209 間。`/api/salary` 外國 mode 帶 `companyType` 時，先查此表撈 company name 集合、再 OR-IN 進 Job 查詢。為 Adzuna 「不索引此雇主」修補：seed 同一公司可加多筆別名（`Google` + `Alphabet` / `Meta` + `Facebook`）。
+> 由 [scripts/seed-company-classifications.mjs](../scripts/seed-company-classifications.mjs) 一次 seed 209 間。`/api/salary` 外國 mode 載入**全部**分類 rows 一次 → 為每筆 Job 用 `companyName.toLowerCase()` contains 比對標上 `companyType`，跟著 raw row 一起回傳前端。前端依使用者選的 `companyType` 在 client 過濾，不再額外查 DB。為 Adzuna「不索引此雇主」修補：seed 同一公司可加多筆別名（`Google` + `Alphabet` / `Meta` + `Facebook`）。
 
 ### ResumeChat / ResumeChatMessage（AI 共創對話 + 提案，Max only）
 
