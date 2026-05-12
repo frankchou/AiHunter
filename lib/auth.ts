@@ -51,6 +51,24 @@ export const authOptions: NextAuthOptions = {
       }
       return session;
     },
+    // Override NextAuth's default `redirect` callback. Default falls
+    // back to `baseUrl` when callbackUrl is missing/cross-origin — but
+    // `/` is now the public landing, so falling there means
+    // "successfully signed in, dropped on marketing page." Force /feed
+    // as the post-login default; (dashboard)/layout routes to
+    // /onboarding when resume/prefs are missing.
+    async redirect({ url, baseUrl }) {
+      const base = baseUrl.replace(/\/+$/, "");
+      if (url.startsWith("/")) return `${base}${url}`;
+      try {
+        const parsed = new URL(url);
+        if (parsed.origin === base) {
+          const path = parsed.pathname + parsed.search;
+          return path === "/" ? `${base}/feed` : `${base}${path}`;
+        }
+      } catch { /* fall through */ }
+      return `${base}/feed`;
+    },
   },
   pages: { signIn: "/login" },
 };

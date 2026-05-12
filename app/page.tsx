@@ -1,27 +1,10 @@
-import { redirect } from "next/navigation";
-import { getServerSession } from "next-auth";
-import { authOptions } from "@/lib/auth";
-import { prisma } from "@/lib/prisma";
 import { LandingPage } from "@/components/landing/LandingPage";
 
-export default async function Home() {
-  const session = await getServerSession(authOptions);
-  // Unauthenticated visitor → marketing landing page.
-  // (Previously this redirected to /login; the new flow surfaces the
-  // value proposition first; login is still one click away.)
-  if (!session) return <LandingPage />;
-
-  // Authenticated users keep the existing onboarding / feed routing.
-  try {
-    const resume = await prisma.resume.findFirst({
-      where: { userId: session.user.id, isActive: true },
-      select: { id: true },
-    });
-    if (!resume) redirect("/onboarding");
-  } catch {
-    // DB not available — send to onboarding to collect resume
-    redirect("/onboarding");
-  }
-
-  redirect("/feed");
+// 首頁 = 公開 marketing landing。**永遠** render LandingPage、與登入
+// 狀態徹底解耦。想進系統：點 LandingHeader 的「登入」走 /login → 按
+// Google → OAuth → /feed。履歷檢查由 (dashboard)/layout.tsx 接手，
+// 無履歷者會被導去 /onboarding。把 session 判斷放這裡會跟「首頁＝
+// 廣告頁」的設計打架，也是「假登出後又被吸進系統」的放大器。
+export default function Home() {
+  return <LandingPage />;
 }

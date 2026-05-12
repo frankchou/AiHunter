@@ -1,7 +1,7 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { signOut, useSession } from "next-auth/react";
+import { useSession } from "next-auth/react";
 import { INDUSTRIES, WORLD_LOCATIONS } from "@/lib/mock-data";
 import type { ParsedResume, ResumeAnalysis } from "@/lib/types";
 import { ResumeEditor } from "./ResumeEditor";
@@ -208,7 +208,7 @@ export function OnboardingFlow({ initialStep = 0, initialParsed = null, initialA
             <div style={{ fontSize: 13, color: "var(--ink-3)", marginTop: 4 }}>AI 驅動求職助手</div>
           </div>
           <button
-            onClick={() => signOut({ callbackUrl: "/login" })}
+            onClick={() => { window.location.href = "/api/logout"; }}
             style={{ fontSize: 12, color: "var(--ink-3)", background: "none", border: "1px solid var(--line)", borderRadius: 6, padding: "5px 12px", cursor: "pointer", fontFamily: "inherit" }}
           >
             登出

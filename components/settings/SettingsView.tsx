@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { signOut, useSession } from "next-auth/react";
+import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
 import { PLANS, currentMonth } from "@/lib/plans";
@@ -87,7 +87,7 @@ export function SettingsView() {
           <button
             className="btn"
             style={{ color: "#e53e3e" }}
-            onClick={() => signOut({ callbackUrl: "/login" })}
+            onClick={() => { window.location.href = "/api/logout"; }}
           >
             登出
           </button>
