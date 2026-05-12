@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { Logo } from "@/components/ui/Logo";
+import { LandingHeader } from "./LandingHeader";
+import { LandingFooter } from "./LandingFooter";
 import { HeroMockup } from "./HeroMockup";
 import "./landing.css";
 
@@ -11,37 +12,15 @@ import "./landing.css";
 export function LandingPage() {
   return (
     <div className="landing">
-      <Header />
+      <LandingHeader />
       <Hero />
       <NumbersStrip />
       <Problem />
       <Features />
       <Audiences />
       <FinalCTA />
-      <SiteFooter />
+      <LandingFooter />
     </div>
-  );
-}
-
-// ─── Header ──────────────────────────────────────────────────────────────────
-function Header() {
-  return (
-    <header className="landing-header">
-      <div className="landing-container landing-header-inner">
-        <Link href="/" className="landing-logo">
-          <Logo size={34} />
-          AI Hunter
-        </Link>
-        <nav className="landing-nav">
-          <Link href="/">首頁</Link>
-          <a href="#features">功能</a>
-          <Link href="/pricing">方案</Link>
-        </nav>
-        <div style={{ flex: 1 }} />
-        <Link href="/login" className="landing-header-login">登入</Link>
-        <Link href="/login" className="landing-header-cta">免費註冊</Link>
-      </div>
-    </header>
   );
 }
 
@@ -68,7 +47,7 @@ function Hero() {
             </p>
             <div className="landing-hero-ctas landing-rise landing-rise-4">
               <Link href="/login" className="landing-btn-primary">免費註冊 →</Link>
-              <Link href="/pricing" className="landing-btn-outline">看方案</Link>
+              <Link href="/plans" className="landing-btn-outline">看方案</Link>
             </div>
             <div className="landing-hero-reassure landing-rise landing-rise-4">
               完全免費上手 · 無需信用卡 · 隨時可升級
@@ -269,7 +248,7 @@ function FinalCTA() {
         <p>免費註冊，30 秒內完成第一份履歷 AI 解析。</p>
         <div style={{ display: "flex", gap: 14, justifyContent: "center", flexWrap: "wrap" }}>
           <Link href="/login" className="landing-btn-primary">免費註冊 →</Link>
-          <Link href="/pricing" className="landing-btn-outline" style={{ background: "transparent", color: "#fff", borderColor: "#fff" }}>看方案</Link>
+          <Link href="/plans" className="landing-btn-outline" style={{ background: "transparent", color: "#fff", borderColor: "#fff" }}>看方案</Link>
         </div>
         <div className="landing-hero-reassure" style={{ color: "#9ca3af" }}>
           完全免費上手 · 無需信用卡 · 隨時可升級
@@ -279,56 +258,5 @@ function FinalCTA() {
   );
 }
 
-// ─── Footer ──────────────────────────────────────────────────────────────────
-function SiteFooter() {
-  return (
-    <footer className="landing-footer">
-      <div className="landing-container">
-        <div className="landing-footer-grid">
-          <div>
-            <div className="landing-logo" style={{ color: "var(--bg)" }}>
-              <Logo size={32} />
-              AI Hunter
-            </div>
-            <p style={{ marginTop: 14, fontSize: 14, color: "#9ca3af", lineHeight: 1.65, maxWidth: 320 }}>
-              讓 AI 幫你找到對的工作。<br />
-              履歷、職缺、面試一條龍。
-            </p>
-          </div>
-          <FooterCol title="產品" links={[
-            { label: "首頁", href: "/" },
-            { label: "功能", href: "#features" },
-            { label: "方案", href: "/pricing" },
-          ]} />
-          <FooterCol title="開始" links={[
-            { label: "免費註冊", href: "/login" },
-            { label: "登入", href: "/login" },
-          ]} />
-          <FooterCol title="法律" links={[
-            { label: "服務條款", href: "/login" },
-            { label: "隱私政策", href: "/login" },
-          ]} />
-        </div>
-        <div className="landing-footer-bottom">
-          <div>© 2026 AI Hunter</div>
-          <div>讓 AI 接管你不想做的求職事務</div>
-        </div>
-      </div>
-    </footer>
-  );
-}
-
-function FooterCol({ title, links }: { title: string; links: { label: string; href: string }[] }) {
-  return (
-    <div>
-      <h4>{title}</h4>
-      <ul>
-        {links.map((l) => (
-          <li key={l.label}>
-            <Link href={l.href}>{l.label}</Link>
-          </li>
-        ))}
-      </ul>
-    </div>
-  );
-}
+// Header + Footer live in LandingHeader.tsx / LandingFooter.tsx so
+// the PlansPage and login page can share the exact same nav.

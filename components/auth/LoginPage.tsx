@@ -1,13 +1,19 @@
 "use client";
 import { signIn } from "next-auth/react";
 import { Logo } from "@/components/ui/Logo";
+import { LandingHeader } from "@/components/landing/LandingHeader";
+import { LandingFooter } from "@/components/landing/LandingFooter";
+import "@/components/landing/landing.css";
 
 export function LoginPage() {
   return (
-    <div style={{
-      minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
-      background: "var(--bg)", padding: 24,
-    }}>
+    <div className="landing" style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+      <LandingHeader compact />
+      <main style={{
+        flex: 1,
+        display: "flex", alignItems: "center", justifyContent: "center",
+        padding: "60px 24px",
+      }}>
       <div style={{ width: "100%", maxWidth: 380, textAlign: "center" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 10, marginBottom: 6 }}>
           <Logo size={40} />
@@ -57,6 +63,8 @@ export function LoginPage() {
           <span>104 / Remotive / Adzuna</span>
         </div>
       </div>
+      </main>
+      <LandingFooter />
     </div>
   );
 }
