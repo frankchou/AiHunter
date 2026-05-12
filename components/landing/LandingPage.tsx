@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LogoMark } from "./LogoMark";
+import { Logo } from "@/components/ui/Logo";
 import { HeroMockup } from "./HeroMockup";
 import "./landing.css";
 
@@ -29,7 +29,7 @@ function Header() {
     <header className="landing-header">
       <div className="landing-container landing-header-inner">
         <Link href="/" className="landing-logo">
-          <LogoMark size={34} />
+          <Logo size={34} />
           AI Hunter
         </Link>
         <nav className="landing-nav">
@@ -287,7 +287,7 @@ function SiteFooter() {
         <div className="landing-footer-grid">
           <div>
             <div className="landing-logo" style={{ color: "var(--bg)" }}>
-              <LogoMark size={32} />
+              <Logo size={32} />
               AI Hunter
             </div>
             <p style={{ marginTop: 14, fontSize: 14, color: "#9ca3af", lineHeight: 1.65, maxWidth: 320 }}>
