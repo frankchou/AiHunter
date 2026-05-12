@@ -14,7 +14,7 @@ import "./landing.css";
 export function PlansPage() {
   return (
     <div className="landing">
-      <LandingHeader compact />
+      <LandingHeader />
       <Intro />
       <PlanCards />
       <FeatureCompare />
