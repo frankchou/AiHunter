@@ -298,29 +298,36 @@ STRIPE_MAX_PRICE_ID=price_...
 
 **資料來源**：我們自己的 Job 表中 `source="adzuna"` 的列（由 Top 20 + job-feed pipeline 寫入）。換句話說：**不再額外打 Adzuna**，純粹彙整既有資料。
 
-**驅動方式**：`/api/salary?country=US&industry=X&companyType=Y&experience=Z` →
-1. `buildJobWhere`：`source:"adzuna"` + `country IN COUNTRY_TO_ADZUNA[country]` + `salary>0` + 可選 `companyType`（先查 `CompanyClassification` 撈公司名集合，再 OR `company contains`）+ 可選 `experience`（用 `Job.yearsMin/yearsMax` overlap 算）。
-2. `prisma.job.findMany`（最多 5000 筆 salary 欄）。
-3. 每列取 (min, max) midpoint，按 `FX_TO_TWD` 換 TWD/年；剔 <100k 或 >30M 的離群（多半是 Adzuna 單位混淆）。
-4. sort → 算 P25 / P50 / P75 / mean。
-5. 回 `summary` + per-mode `source.note`（誠實標註：是雇主開價、不是員工實得；年資為職缺要求年資，非實際工作年資）。
+**Server 職責（薄）**：`/api/salary?country=US&industry=X` →
+1. 載入全部 `CompanyClassification` rows（~209 筆，cheap），建好 `companyName.toLowerCase() → companyType` 比對表。
+2. `prisma.job.findMany`：`source:"adzuna"` + `country IN COUNTRY_TO_ADZUNA[country]` + `industry = X` + `salary>0`（最多 5000 筆）。
+3. 對每列：取 (min, max) midpoint × `FX_TO_TWD[ccy]` → TWD/年；剔 <100k 或 >30M 的離群；用比對表 mark 該 row 的 `companyType`。
+4. 回前端 `{ rows: SalaryJobRow[] }`：`{ salaryAnnualTwd, companyType, yearsMin, yearsMax, title }` 每列一個。
+
+**Client 職責（厚）**：拿到 rows 後在前端做：
+- 依 `companyType` / `experience` / `titleQuery` 過濾 rows（useMemo 即時）
+- sort + P25 / P50 / P75 / mean 計算（useMemo 即時）
+- 自評百分位（三點線性插值，cap [0, 100]）
+- 自評幣別換算（TWD ↔ 在地 USD/GBP/EUR/AUD）
+
+**為什麼這樣切**：使用者切 filter / 改幣別 / 打輸入框數字**完全不打 API**。SWR fetch key 只跟 `(country, industry, occupation for TW)` 走 — 切 filter 是瞬間、不會閃、不會 spinner。
 
 **支援的國家**：
 
-| 國家 | mode | 備註 |
+| chip | 對應 Adzuna country tag | 備註 |
 |---|---|---|
-| TW | tw_gov | Phase 1 路徑（政府資料） |
-| US | adzuna | Adzuna US 國家標籤；樣本足夠 |
-| UK | adzuna | Adzuna GB 國家標籤 |
-| AU | adzuna | Adzuna AU 國家標籤 |
-| EU | adzuna | 合成 DE/FR/NL/ES/IT/PL；Adzuna 歐洲 per-country 不均 |
-| JP / KR / CN | disabled | UI chip 灰，點選後顯示「資料尚未開放」卡 |
+| 台灣 | (走 Phase 1 政府路徑) | label 上不寫「政府」字樣 |
+| 美國 | `US` | 樣本最多 |
+| 英國 | `GB` | |
+| 澳洲 | `AU` | |
+| 歐洲（德/法/荷/西/義/波） | `DE` + `FR` + `NL` + `ES` + `IT` + `PL` | UK 走獨立 chip，不重複合進 EU |
+| 日本 / 韓國 / 中國 | (disabled，chip 灰) | Adzuna per-country 端點覆蓋近乎零 |
 
 **JP/KR/CN 的真實狀況**（不是「完全沒資料」）：Adzuna **per-country** 端點對日韓中近乎零，所以我們的 Job 表用 `country=JP` 撈不到東西。但 Top 20 + job-feed 從 US/UK/EU 抓的職缺中，**確實有亞洲總部公司的海外職位**（如 MediaTek 美國 office、Sony US 職位）— 這些已被算進其對應的駐在國（US/UK/EU）薪資池，不是「JP 在地薪資」。
 
-**前端互動 vs 不閃**：UI 把 `userMonthly` / `userAnnual` 完全留在前端，self-eval 用 `useMemo` 即時算。SWR fetch key 只跟 (country, industry, occupation, companyType, experience) 走 → 打數字不會觸發 refetch，不會閃。
+**Industry 強制必填**：兩個 mode 都不再支援「全產業聚合」。沒選產業 chip → 顯示 empty state「請選擇產業」。這避免「打開頁面就跳一個無意義 1154 筆 US 全產業數字」的誤導。
 
-**6 個 CompanyType bucket**：
+**6 個 CompanyType bucket（依國家動態裁切）**：
 
 | key | 中文 | 範例 |
 |---|---|---|
@@ -331,24 +338,46 @@ STRIPE_MAX_PRICE_ID=price_...
 | `sme` | 中小企業 | Notion / Figma / Linear / Vercel |
 | `startup` | 新創 | Cohere / Perplexity / Cursor / Scale AI |
 
+UI 動態：
+- **TW** dropdown：藏 `foreign_tier1` + `foreign_traditional`（在台灣看「Tier-1 外商」這標籤沒意義）
+- **Foreign** dropdown：藏 `tw_local`（在 US 看「台商」會抓到 TW-HQ 公司的美國 office，誤導為「該國在地薪資」）
+- 切國家時若當前選項在新國家不在白名單 → 自動 reset 成「不分」
+
 **Seed**：[scripts/seed-company-classifications.mjs](../scripts/seed-company-classifications.mjs) 一次 upsert **209 間**（初版；隨 Adzuna 看到的雇主擴張）。同一公司多筆別名容許（`Google` + `Alphabet`），用 `companyName` 唯一鍵 upsert。
 
 **5 段年資 bucket**：`exp_0`（應屆）/ `exp_1_3` / `exp_3_7` / `exp_7_10` / `exp_10p`，比對 `Job.yearsMin/yearsMax` 與 bucket 區間是否有 overlap。
 
-**FX 換算**：`FX_TO_TWD` 寫死於 [adzuna-aggregate.ts](../lib/salary-sources/adzuna-aggregate.ts)；USD=32 / GBP=40.5 / EUR=35 / AUD=21 / JPY=0.21 等。匯率漂移 >10% 時手動更新。
+**職位搜尋**：兩 mode 都有，純客端：
+- TW：filter `data.rows`（職類別 row）by `occupation.toLowerCase().includes(query)`
+- Adzuna：filter `rows` by `title.toLowerCase().includes(query)`
 
-**自評百分位估計**：從前端拿 P25/P50/P75 三點線性插值，外推時 cap 在 100。這是粗估，UI 標「約 PXX」非精確值。
+**FX 換算**：`FX_TO_TWD` 寫死於 [adzuna-aggregate.ts](../lib/salary-sources/adzuna-aggregate.ts) **以及** [SalaryView.tsx](../components/salary/SalaryView.tsx)。Server 拿 Adzuna salary 時用、Client 拿使用者輸入的 USD/GBP/EUR/AUD 時用。**兩處要保持一致**；漂移 >10% 時兩處同步更新。
+
+**自評輸入**：
+- TWD 模式：月薪「元」、年薪「萬」
+- 在地幣模式（foreign 才出現切換）：月薪 USD/GBP/EUR/AUD/月、年薪 同幣別/年（沒有「萬」）
+- 雙模式都依 `FX_TO_TWD` 換算到 TWD/年才比對 P50
+- 自評卡內含 年資 select：TW disabled（gov 資料無此維度），Foreign enabled（跟頂部 filter 共用同一個 `experience` state）
+
+**自評百分位估計**：從 client 算的 P25/P50/P75 三點線性插值，外推時 cap 在 100。粗估，UI 標「約 PXX」非精確值。
+
+**自評落點 context**：每張自評結果卡顯示完整 filter 條件「篩選條件：US · AI/ML · Tier-1 外商 · 3-7 年 · 職位「Software Engineer」」讓使用者知道「我跟誰比」。Foreign mode 在沒選年資時跳警示「⚠️ 還沒選年資 — 你正在跟整個年資區間比較」。
+
+**Empty state 文案區分**：
+- 整批 0 樣本（server 回 `hasData: false`）：「『產業名』在『國家』暫無樣本，試試其他產業或國家。filter 是進階篩選、非必填」 — **不**叫使用者去動 filter
+- 拉回有資料但客端 filter 過濾到 0：自評卡下方提示「目前 filter 組合無樣本，試著放寬篩選」
 
 #### Phase 1 vs Phase 2 範圍對照
 
 | 維度 | Phase 1 (TW gov) | Phase 2 (Adzuna) | 待補（Phase 3）|
 |---|---|---|---|
-| 產業 × 職類別 | ✅ | ⚠️ 無職類欄（Adzuna title 自由文字） | AI 分類職缺 title |
+| 產業 × 職類別 | ✅（17 行業大類 × ~10-50 職類 / 業）| ⚠️ 無職類欄（Adzuna title 自由文字） | AI 分類 Adzuna title |
 | 平均 / 中位數 | 僅平均 | P25/P50/P75 + mean | — |
 | 國家 | TW only | US/UK/AU/EU；JP/KR/CN 灰 | 接 LinkedIn / 在地求職平台 |
-| 企業類型（6 類）| 政府無此欄 | ✅（透過 CompanyClassification） | — |
-| 年資 | 政府無此欄 | ✅（職缺要求年資 proxy） | 履歷實際年資 |
-| 證照 / 作品 / 學歷 | — | — | 由 AI 解析履歷推估 |
+| 企業類型（6 類）| 政府無此欄（UI 顯示但 disabled）| ✅（透過 CompanyClassification） | TW 也支援需另接資料源 |
+| 年資 | 政府無此欄（UI 顯示但 disabled）| ✅（職缺要求年資 proxy） | TW 接「人力運用調查」或自建履歷年資資料庫；Foreign 改用實際員工年資 |
+| 證照 / 作品 / 學歷 | — | — | AI 解析履歷推估 |
+| 在地幣輸入 | 僅 TWD | TWD / 在地幣（USD/GBP/EUR/AUD）切換 | 反向：給 TW 薪水算「對應目標國應該領多少」更突顯的 UX |
 
 **計費**：無。Twinkle 目前 alpha 免費；Adzuna 路徑只讀我們自己的 Job 表，零外呼。未來資料源收費時，driver 抽象在 `lib/salary-sources/` 可換源（接主計處 CSV 等）。
 

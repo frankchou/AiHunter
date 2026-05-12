@@ -41,7 +41,7 @@ export const COUNTRY_TO_ADZUNA: Record<string, string[]> = {
   US: ["US"],
   UK: ["GB"],
   AU: ["AU"],
-  EU: ["DE", "FR", "NL", "ES", "IT", "PL"],
+  EU: ["DE", "FR", "NL", "ES", "IT", "PL"],   // UK 走獨立 chip，這裡不重複
   // JP / KR / CN intentionally absent — Adzuna doesn't index them in a
   // meaningful way. The UI shows these as 灰 disabled chips.
 };
@@ -61,6 +61,7 @@ export interface AdzunaSalaryQuery {
   country:      keyof typeof COUNTRY_TO_ADZUNA;
   companyType?: CompanyType | null;
   experience?:  keyof typeof EXPERIENCE_BUCKETS | null;
+  title?:       string;        // free-text contains match against Job.title
 }
 
 export interface AdzunaSalaryResult {
@@ -122,6 +123,9 @@ async function buildJobWhere(q: AdzunaSalaryQuery): Promise<Record<string, unkno
     where.yearsMin = { lte: b.max };
     where.yearsMax = { gte: b.min };
   }
+  if (q.title && q.title.trim()) {
+    where.title = { contains: q.title.trim(), mode: "insensitive" };
+  }
   return where;
 }
 
@@ -138,6 +142,83 @@ function percentile(sortedAsc: number[], p: number): number {
   const lo = Math.floor(idx), hi = Math.ceil(idx);
   if (lo === hi) return sortedAsc[lo];
   return sortedAsc[lo] + (sortedAsc[hi] - sortedAsc[lo]) * (idx - lo);
+}
+
+// Single row shipped to the client for client-side filtering. The
+// server pre-classifies each job's companyType (so the client doesn't
+// need the CompanyClassification table) and ships the raw experience
+// window so the client can do the overlap check itself.
+export interface SalaryJobRow {
+  salaryAnnualTwd: number;
+  companyType:     CompanyType | null;
+  yearsMin:        number | null;
+  yearsMax:        number | null;
+  title:           string;
+}
+
+export async function fetchAdzunaSalaryRows(
+  country:  keyof typeof COUNTRY_TO_ADZUNA,
+  industry: string,
+): Promise<SalaryJobRow[]> {
+  // 1. Load the full classification list once. ~200 rows so cheap.
+  const classifications = await prisma.companyClassification.findMany({
+    select: { companyName: true, companyType: true },
+  });
+  // Pre-compute lowercase company-name + indicator for O(N) scan per job.
+  const classifiers = classifications.map((c) => ({
+    needle: c.companyName.toLowerCase(),
+    type:   c.companyType as CompanyType,
+  }));
+
+  // 2. Pull every Adzuna job in (country, industry) with salary > 0.
+  type JobRaw = {
+    salaryMin: number | null; salaryMax: number | null; ccy: string | null;
+    company:   string | null; yearsMin:  number | null; yearsMax: number | null;
+    title:     string;
+  };
+  const jobs: JobRaw[] = await prisma.job.findMany({
+    where: {
+      source:  "adzuna",
+      country: { in: COUNTRY_TO_ADZUNA[country] },
+      industry,
+      OR: [
+        { salaryMin: { not: null, gt: 0 } },
+        { salaryMax: { not: null, gt: 0 } },
+      ],
+    },
+    select: {
+      salaryMin: true, salaryMax: true, ccy: true,
+      company:   true, yearsMin:  true, yearsMax: true, title: true,
+    },
+    take: 5000,
+  });
+
+  // 3. Normalise to TWD/year + classify + drop junk.
+  const out: SalaryJobRow[] = [];
+  for (const j of jobs) {
+    const mid = pickMidpoint(j.salaryMin, j.salaryMax);
+    if (mid == null) continue;
+    const fx = j.ccy && FX_TO_TWD[j.ccy] ? FX_TO_TWD[j.ccy] : 1;
+    const inTwd = mid * fx;
+    if (inTwd < 100_000 || inTwd > 30_000_000) continue;
+
+    const compLower = (j.company ?? "").toLowerCase();
+    let companyType: CompanyType | null = null;
+    if (compLower) {
+      for (const c of classifiers) {
+        if (compLower.includes(c.needle)) { companyType = c.type; break; }
+      }
+    }
+
+    out.push({
+      salaryAnnualTwd: Math.round(inTwd),
+      companyType,
+      yearsMin:        j.yearsMin,
+      yearsMax:        j.yearsMax,
+      title:           j.title,
+    });
+  }
+  return out;
 }
 
 export async function aggregateAdzunaSalary(q: AdzunaSalaryQuery): Promise<AdzunaSalaryResult> {

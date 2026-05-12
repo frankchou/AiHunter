@@ -81,8 +81,12 @@ AiHunter/
 │   │   ├── CoCreateButton.tsx # 右下浮動按鈕（Max-only）
 │   │   └── CoCreatePanel.tsx  # 共創對話面板（桌機側拉 / 手機全螢幕 sheet）
 │   ├── salary/
-│   │   └── SalaryView.tsx     # 薪資查詢頁（國家 chip / 產業 chip / Adzuna filter / 自評輸入；
-│   │                          #   self-eval 純前端算，避免每打一字 refetch）
+│   │   └── SalaryView.tsx     # 薪資查詢頁。SWR fetch key 只跟 (country, industry, occupation) 走；
+│   │                          #   companyType / experience / titleQuery / salary input / currency
+│   │                          #   全部前端 useMemo 即時算 → 切 filter / 打數字都不 refetch、不閃。
+│   │                          #   Adzuna 樣本 P25/P50/P75 + 自評百分位都在 client 算。
+│   │                          #   TW 政府資料無 companyType/experience 維度，UI 顯示但 disabled。
+│   │                          #   Foreign 自評支援 TWD ↔ 在地幣切換（USD/GBP/EUR/AUD）。
 │   ├── subscription/
 │   │   ├── AdWatcher.tsx       # 廣告觀看元件（3 則序列）
 │   │   ├── PricingView.tsx     # 方案選擇頁（含取消/降級按鈕；TWD 顯示）
@@ -109,7 +113,9 @@ AiHunter/
 │   └── salary-sources/        # 薪資資料 driver 層（每個源獨立檔案）
 │       ├── industry-mapping.ts # 我們 37 產業 → 政府 17 行業大類對照
 │       ├── twinkle.ts         # Twinkle Hub / 勞動部 抓取 + 加權平均
-│       ├── adzuna-aggregate.ts # 從 Job 表彙整 P25/P50/P75（FX→TWD、剔異常值）
+│       ├── adzuna-aggregate.ts # fetchAdzunaSalaryRows()：撈 Job 表 + 預分類 companyType
+│       │                       #   + FX→TWD + 剔異常值 → 回 raw rows 給前端 filter。
+│       │                       #   FX_TO_TWD 寫死於此（USD/GBP/EUR/AUD/JPY 等）。
 │       └── company-types.ts   # 6 個 CompanyType bucket + zh-TW label
 ├── scripts/
 │   └── seed-company-classifications.mjs # 公司分類種子（209 間，可擴充）
@@ -538,6 +544,13 @@ PlanChangeModal 開啟 — Step 1: Impact 警告
 | /api/saved | /api/saved | true（雙向同步）|
 | /api/user/profile | /api/user/profile | true |
 | /api/stocks | 依 symbols | false |
+| /api/salary | `?country=X&industry=Y[&occupation=Z]`（**不**含 filter） | false + `keepPreviousData: true` |
+
+### 薪資查詢快取策略（client + server 雙層）
+
+- **Server**：TW 用 `SalaryCache(datasetId, year)` 7 天 TTL；Adzuna 純讀現有 Job 表（無額外快取，Job 表本身由 job-feed pipeline 維護）
+- **Client**：SWR fetch key 故意只包含 `(country, industry, occupation)`。`companyType` / `experience` / `titleQuery` / `inputCurrency` / `userMonthly` / `userAnnual` **不在 key 裡**，純前端 `useMemo` 算 → 切 filter / 改幣別 / 打數字都不重發 request。
+- **架構代價**：Adzuna response 可能含 ~1000-5000 rows（每 row ~50 bytes，~100-300KB），但只在切國家或產業時拉一次。換來「切 filter 是瞬間」的 UX，划得來。
 
 ### 產業 Top 20 快取
 

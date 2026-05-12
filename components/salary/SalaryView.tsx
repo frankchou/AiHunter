@@ -3,54 +3,50 @@ import { useState, useMemo } from "react";
 import useSWR from "swr";
 import { INDUSTRIES } from "@/lib/mock-data";
 
-interface SalaryRow {
+// ─── Response shapes ────────────────────────────────────────────────────────
+
+interface TwGovRow {
   occupation:    string;
   employees:     number;
   monthlyTwd:    number;
   annualTwdWan:  number;
 }
-
 interface TwSummary {
   totalEmployees:    number;
   weightedMonthly:   number;
   weightedAnnualWan: number;
   occupationCount:   number;
 }
-
-interface AdzunaSummary {
-  sampleSize:    number;
-  p25Annual:     number | null;
-  p50Annual:     number | null;
-  p75Annual:     number | null;
-  meanAnnual:    number | null;
-  p25Monthly:    number | null;
-  p50Monthly:    number | null;
-  p75Monthly:    number | null;
-  meanMonthly:   number | null;
+interface AdzunaJobRow {
+  salaryAnnualTwd: number;
+  companyType:     string | null;     // pre-classified by server
+  yearsMin:        number | null;
+  yearsMax:        number | null;
+  title:           string;
 }
-
 interface SalarySource { provider: string; agency: string; note: string }
 
 interface SalaryResponse {
-  // shared
-  industry?: string | null;
-  country?:  string;
-  hasData:   boolean;
-  reason?:   string;
-  source?:   SalarySource;
-  // TW gov mode
-  mode?:     "tw_gov" | "adzuna";
+  industry?:  string;
+  country?:   string;
+  hasData:    boolean;
+  reason?:    string;
+  source?:    SalarySource;
+  mode?:      "tw_gov" | "adzuna";
+  // tw_gov
   datasetId?: string;
   govName?:   string;
   year?:      string;
-  summary?:   TwSummary | AdzunaSummary;
-  rows?:      SalaryRow[];
-  selected?:  SalaryRow | null;
-  // Adzuna mode
-  companyType?:      string | null;
-  companyTypeLabel?: string | null;
-  experience?:       string | null;
-  experienceLabel?:  string | null;
+  summary?:   TwSummary;
+  rows?:      TwGovRow[] | AdzunaJobRow[];
+}
+
+interface ComputedSummary {
+  sampleSize:  number;
+  p25Annual:   number | null;
+  p50Annual:   number | null;
+  p75Annual:   number | null;
+  meanAnnual:  number | null;
 }
 
 interface ForeignSelfEval {
@@ -63,7 +59,6 @@ interface ForeignSelfEval {
   diffAnnualPct:     number | null;
   percentile:        number | null;
 }
-
 interface TwSelfEval {
   basis:            "occupation" | "industry";
   againstMonthly:   number;
@@ -77,17 +72,17 @@ interface TwSelfEval {
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 const COUNTRIES: { code: string; label: string; mode: "tw_gov" | "adzuna" | "disabled" }[] = [
-  { code: "TW", label: "台灣（政府）",   mode: "tw_gov" },
-  { code: "US", label: "美國",         mode: "adzuna" },
-  { code: "UK", label: "英國",         mode: "adzuna" },
-  { code: "AU", label: "澳洲",         mode: "adzuna" },
-  { code: "EU", label: "歐洲（六國）", mode: "adzuna" },
-  { code: "JP", label: "日本",         mode: "disabled" },
-  { code: "KR", label: "韓國",         mode: "disabled" },
-  { code: "CN", label: "中國",         mode: "disabled" },
+  { code: "TW", label: "台灣",                        mode: "tw_gov" },
+  { code: "US", label: "美國",                        mode: "adzuna" },
+  { code: "UK", label: "英國",                        mode: "adzuna" },
+  { code: "AU", label: "澳洲",                        mode: "adzuna" },
+  { code: "EU", label: "歐洲（德/法/荷/西/義/波）",       mode: "adzuna" },
+  { code: "JP", label: "日本",                        mode: "disabled" },
+  { code: "KR", label: "韓國",                        mode: "disabled" },
+  { code: "CN", label: "中國",                        mode: "disabled" },
 ];
 
-const COMPANY_TYPE_OPTIONS = [
+const COMPANY_TYPE_BASE = [
   { value: "",                    label: "不分企業類型" },
   { value: "foreign_tier1",       label: "Tier-1 外商" },
   { value: "foreign_traditional", label: "傳統外商" },
@@ -96,14 +91,38 @@ const COMPANY_TYPE_OPTIONS = [
   { value: "sme",                 label: "中小企業" },
   { value: "startup",             label: "新創" },
 ];
+function companyTypeOptions(country: string) {
+  // TW: hide 外商；Foreign: hide 台商。
+  if (country === "TW") {
+    return COMPANY_TYPE_BASE.filter((o) =>
+      !["foreign_tier1", "foreign_traditional"].includes(o.value)
+    );
+  }
+  return COMPANY_TYPE_BASE.filter((o) => o.value !== "tw_local");
+}
 
+// Local currency per country (foreign modes only). EU defaults to EUR
+// even though our EU bucket now includes GB; users wanting GBP can pick
+// the standalone UK chip.
+const LOCAL_CURRENCY: Record<string, string> = {
+  US: "USD", UK: "GBP", AU: "AUD", EU: "EUR",
+};
+// Match the rates baked into lib/salary-sources/adzuna-aggregate.ts so
+// client-side conversion is consistent with the server's per-job FX.
+const FX_TO_TWD: Record<string, number> = {
+  TWD: 1, USD: 32, GBP: 40.5, EUR: 35, AUD: 21,
+};
+
+const EXPERIENCE_BUCKETS: Record<string, { label: string; min: number; max: number }> = {
+  exp_0:    { label: "0 年（應屆）",   min: 0,  max: 0  },
+  exp_1_3:  { label: "1-3 年",        min: 1,  max: 3  },
+  exp_3_7:  { label: "3-7 年",        min: 3,  max: 7  },
+  exp_7_10: { label: "7-10 年",       min: 7,  max: 10 },
+  exp_10p:  { label: "10+ 年",        min: 10, max: 99 },
+};
 const EXPERIENCE_OPTIONS = [
   { value: "",         label: "不分年資" },
-  { value: "exp_0",    label: "0 年（應屆）" },
-  { value: "exp_1_3",  label: "1-3 年" },
-  { value: "exp_3_7",  label: "3-7 年" },
-  { value: "exp_7_10", label: "7-10 年" },
-  { value: "exp_10p",  label: "10+ 年" },
+  ...Object.entries(EXPERIENCE_BUCKETS).map(([value, b]) => ({ value, label: b.label })),
 ];
 
 function fmtTwd(n: number | null | undefined): string {
@@ -112,31 +131,54 @@ function fmtTwd(n: number | null | undefined): string {
   return n.toLocaleString("zh-TW");
 }
 
+function percentile(sortedAsc: number[], p: number): number {
+  if (!sortedAsc.length) return 0;
+  const idx = (sortedAsc.length - 1) * p;
+  const lo = Math.floor(idx), hi = Math.ceil(idx);
+  if (lo === hi) return sortedAsc[lo];
+  return sortedAsc[lo] + (sortedAsc[hi] - sortedAsc[lo]) * (idx - lo);
+}
+
 export function SalaryView() {
   const [country, setCountry] = useState<string>("TW");
   const [selectedIndustry, setSelectedIndustry] = useState<string | null>(null);
   const [selectedOccupation, setSelectedOccupation] = useState<string | null>(null);
   const [companyType, setCompanyType] = useState<string>("");
   const [experience, setExperience]   = useState<string>("");
+  const [titleQuery, setTitleQuery]   = useState<string>("");
   const [userMonthlyInput, setUserMonthlyInput] = useState("");
   const [userAnnualInput, setUserAnnualInput]   = useState("");
+  const [inputCurrency, setInputCurrency]       = useState<string>("TWD");
 
   const isForeign  = country !== "TW";
   const isDisabled = ["JP", "KR", "CN"].includes(country);
 
-  // URL excludes user salary inputs — self-eval is computed client-side so
-  // typing into the input never refetches and never flickers the layout.
+  function switchCountry(next: string) {
+    setCountry(next);
+    setSelectedOccupation(null);
+    if (next !== "TW" && companyType === "tw_local") setCompanyType("");
+    if (next === "TW" && ["foreign_tier1", "foreign_traditional"].includes(companyType)) {
+      setCompanyType("");
+    }
+    // Currency follows country: TW always TWD; foreign keeps TWD until
+    // the user explicitly picks the local one.
+    if (next === "TW") setInputCurrency("TWD");
+    // If user was viewing US with USD and switches to UK, reset to TWD
+    // so the unit label doesn't lie.
+    if (inputCurrency !== "TWD" && inputCurrency !== LOCAL_CURRENCY[next]) {
+      setInputCurrency("TWD");
+    }
+  }
+
+  // URL only depends on (country, industry, [occupation for TW]).
+  // All other filters (companyType / experience / title) are client-side.
   const apiUrl = useMemo(() => {
     if (isDisabled) return null;
-    // For TW, an industry must be picked. For foreign, industry is optional.
-    if (!isForeign && !selectedIndustry) return null;
-    const params = new URLSearchParams({ country });
-    if (selectedIndustry)   params.set("industry", selectedIndustry);
+    if (!selectedIndustry) return null;
+    const params = new URLSearchParams({ country, industry: selectedIndustry });
     if (!isForeign && selectedOccupation) params.set("occupation", selectedOccupation);
-    if (isForeign && companyType) params.set("companyType", companyType);
-    if (isForeign && experience)  params.set("experience", experience);
     return `/api/salary?${params.toString()}`;
-  }, [country, isForeign, isDisabled, selectedIndustry, selectedOccupation, companyType, experience]);
+  }, [country, isForeign, isDisabled, selectedIndustry, selectedOccupation]);
 
   const { data, isLoading } = useSWR<SalaryResponse>(apiUrl, fetcher, {
     revalidateOnFocus: false,
@@ -147,18 +189,65 @@ export function SalaryView() {
     ? INDUSTRIES.find((i) => i.id === selectedIndustry)?.name
     : null;
 
-  // ── Client-side self-eval (no API call) ────────────────────────────
+  // ── Adzuna client-side filtering + summary ──────────────────────────
+  const adzunaFiltered = useMemo<AdzunaJobRow[]>(() => {
+    if (data?.mode !== "adzuna" || !data.rows) return [];
+    const rows = data.rows as AdzunaJobRow[];
+    const tq = titleQuery.trim().toLowerCase();
+    const expBucket = experience ? EXPERIENCE_BUCKETS[experience] : null;
+    return rows.filter((r) => {
+      if (companyType && r.companyType !== companyType) return false;
+      if (tq && !r.title.toLowerCase().includes(tq)) return false;
+      if (expBucket) {
+        // Job spans [yearsMin, yearsMax]; bucket spans [min, max].
+        // Overlap iff yearsMin <= bucket.max AND yearsMax >= bucket.min.
+        // Nulls match anything.
+        const ymin = r.yearsMin ?? 0;
+        const ymax = r.yearsMax ?? 99;
+        if (ymin > expBucket.max || ymax < expBucket.min) return false;
+      }
+      return true;
+    });
+  }, [data, companyType, experience, titleQuery]);
+
+  const adzunaSummary = useMemo<ComputedSummary | null>(() => {
+    if (data?.mode !== "adzuna") return null;
+    if (adzunaFiltered.length === 0) {
+      return { sampleSize: 0, p25Annual: null, p50Annual: null, p75Annual: null, meanAnnual: null };
+    }
+    const sorted = adzunaFiltered.map((r) => r.salaryAnnualTwd).sort((a, b) => a - b);
+    const mean = sorted.reduce((s, x) => s + x, 0) / sorted.length;
+    return {
+      sampleSize: sorted.length,
+      p25Annual:  Math.round(percentile(sorted, 0.25)),
+      p50Annual:  Math.round(percentile(sorted, 0.50)),
+      p75Annual:  Math.round(percentile(sorted, 0.75)),
+      meanAnnual: Math.round(mean),
+    };
+  }, [data, adzunaFiltered]);
+
+  // TW rows filtered by title (occupation 名稱 contains)
+  const twFilteredRows = useMemo<TwGovRow[]>(() => {
+    if (data?.mode !== "tw_gov" || !data.rows) return [];
+    const rows = data.rows as TwGovRow[];
+    const tq = titleQuery.trim().toLowerCase();
+    return tq ? rows.filter((r) => r.occupation.toLowerCase().includes(tq)) : rows;
+  }, [data, titleQuery]);
+
+  // ── Self-eval (client-side, always derived from current state) ──────
   const localSelfEval = useMemo<TwSelfEval | ForeignSelfEval | null>(() => {
-    if (!data?.hasData || !data.summary) return null;
+    if (!data?.hasData) return null;
     const um = userMonthlyInput ? Number(userMonthlyInput) : NaN;
     const ua = userAnnualInput   ? Number(userAnnualInput)  : NaN;
     const userMonthly = Number.isFinite(um) && um > 0 ? um : null;
 
-    if (data.mode === "tw_gov") {
+    if (data.mode === "tw_gov" && data.summary) {
       const summary = data.summary as TwSummary;
       const userAnnualEl = Number.isFinite(ua) && ua > 0 ? ua * 10000 : null;
       if (userMonthly == null && userAnnualEl == null) return null;
-      const sel = data.selected;
+      const sel = selectedOccupation
+        ? (data.rows as TwGovRow[]).find((r) => r.occupation === selectedOccupation) ?? null
+        : null;
       const baseMonthly  = sel ? sel.monthlyTwd        : summary.weightedMonthly;
       const baseAnnualEl = sel ? sel.annualTwdWan * 10000 : summary.weightedAnnualWan * 10000;
       const pct = (u: number | null, b: number) => u != null && b > 0 ? ((u - b) / b) * 100 : null;
@@ -173,33 +262,49 @@ export function SalaryView() {
       };
     }
 
-    // Adzuna mode
-    const summary = data.summary as AdzunaSummary;
-    const userAnnualTwd = Number.isFinite(ua) && ua > 0 ? ua * 10000 : null;
-    if (userMonthly == null && userAnnualTwd == null) return null;
-    if (summary.p50Annual == null) return null;
-    const annualUser = userAnnualTwd ?? (userMonthly! * 12);
-    const p25 = summary.p25Annual, p50 = summary.p50Annual, p75 = summary.p75Annual;
-    let perc: number | null = null;
-    if (p25 != null && p75 != null) {
-      if      (annualUser <= p25) perc = 25 * (annualUser / p25);
-      else if (annualUser <= p50) perc = 25 + 25 * ((annualUser - p25) / (p50 - p25));
-      else if (annualUser <= p75) perc = 50 + 25 * ((annualUser - p50) / (p75 - p50));
-      else                        perc = 75 + 25 * Math.min(1, (annualUser - p75) / (p75 * 0.5));
-      perc = Math.max(0, Math.min(100, perc));
+    if (data.mode === "adzuna" && adzunaSummary) {
+      // For foreign mode, user may input in TWD or the country's local
+      // currency. Convert both to TWD for comparison against the (already
+      // TWD-normalised) p50.
+      const fx = FX_TO_TWD[inputCurrency] ?? 1;
+      // If input currency is TWD: 年薪 input is in 萬, multiply by 10000.
+      // If input is foreign: 年薪 input is in that currency directly (no 萬).
+      const annualMul = inputCurrency === "TWD" ? 10000 : 1;
+      const userMonthlyTwd = userMonthly != null ? userMonthly * fx : null;
+      const userAnnualTwd  = Number.isFinite(ua) && ua > 0 ? ua * annualMul * fx : null;
+      if (userMonthlyTwd == null && userAnnualTwd == null) return null;
+      if (adzunaSummary.p50Annual == null) return null;
+      const annualUser = userAnnualTwd ?? (userMonthlyTwd! * 12);
+      const p25 = adzunaSummary.p25Annual, p50 = adzunaSummary.p50Annual, p75 = adzunaSummary.p75Annual;
+      let perc: number | null = null;
+      if (p25 != null && p75 != null && p50 != null) {
+        if      (annualUser <= p25) perc = 25 * (annualUser / p25);
+        else if (annualUser <= p50) perc = 25 + 25 * ((annualUser - p25) / (p50 - p25));
+        else if (annualUser <= p75) perc = 50 + 25 * ((annualUser - p50) / (p75 - p50));
+        else                        perc = 75 + 25 * Math.min(1, (annualUser - p75) / (p75 * 0.5));
+        perc = Math.max(0, Math.min(100, perc));
+      }
+      const pct = (a: number, b: number) => b > 0 ? ((a - b) / b) * 100 : null;
+      return {
+        basis: "median",
+        againstAnnualTwd:  p50,
+        againstMonthlyTwd: Math.round(p50 / 12),
+        userMonthly:       userMonthlyTwd,
+        userAnnual:        userAnnualTwd,
+        diffMonthlyPct:    userMonthlyTwd != null ? pct(userMonthlyTwd, p50 / 12) : null,
+        diffAnnualPct:     userAnnualTwd  != null ? pct(userAnnualTwd,  p50)      : null,
+        percentile:        perc == null ? null : Math.round(perc),
+      };
     }
-    const pct = (a: number, b: number) => b > 0 ? ((a - b) / b) * 100 : null;
-    return {
-      basis: "median",
-      againstAnnualTwd:  p50,
-      againstMonthlyTwd: Math.round(p50 / 12),
-      userMonthly,
-      userAnnual:        userAnnualTwd,
-      diffMonthlyPct:    userMonthly    != null ? pct(userMonthly,    p50 / 12) : null,
-      diffAnnualPct:     userAnnualTwd  != null ? pct(userAnnualTwd,  p50)      : null,
-      percentile:        perc == null ? null : Math.round(perc),
-    };
-  }, [data, userMonthlyInput, userAnnualInput]);
+
+    return null;
+  }, [data, adzunaSummary, userMonthlyInput, userAnnualInput, selectedOccupation]);
+
+  // TW gov data doesn't have company-type or experience info, so those
+  // two filters can't do anything in TW. Keep the UI visible (parity)
+  // but disable them with a tooltip.
+  const twFilterDisabled = !isForeign;
+  const twFilterDisabledHint = "TW 政府公開資料無此維度，篩選器暫時無效";
 
   return (
     <div className="app-content">
@@ -223,17 +328,8 @@ export function SalaryView() {
               <span
                 key={c.code}
                 className={`chip${active ? " active" : ""}`}
-                onClick={() => {
-                  if (disabled) {
-                    setCountry(c.code);  // still allow selecting to show the no-data card
-                  } else {
-                    setCountry(c.code);
-                  }
-                  setSelectedOccupation(null);
-                }}
-                style={disabled
-                  ? { opacity: 0.5, fontStyle: "italic" }
-                  : undefined}
+                onClick={() => switchCountry(c.code)}
+                style={disabled ? { opacity: 0.5, fontStyle: "italic" } : undefined}
                 title={disabled ? "該國資料尚未開放" : c.label}
               >
                 {c.label}{disabled ? " · 灰" : ""}
@@ -243,35 +339,61 @@ export function SalaryView() {
         </div>
       </div>
 
-      {/* Adzuna-only filters */}
-      {isForeign && !isDisabled && (
+      {/* Filters bar — same UI for both modes; TW disables companyType + experience */}
+      {!isDisabled && (
         <div style={{
           display: "flex", gap: 12, flexWrap: "wrap", marginBottom: 12, fontSize: 12, color: "var(--ink-2)",
+          alignItems: "center",
         }}>
-          <label>
+          <label title={twFilterDisabled ? twFilterDisabledHint : undefined}>
             企業類型{" "}
             <select
               value={companyType}
               onChange={(e) => setCompanyType(e.target.value)}
-              style={selectStyle}
+              disabled={twFilterDisabled}
+              style={{ ...selectStyle, opacity: twFilterDisabled ? 0.5 : 1, cursor: twFilterDisabled ? "not-allowed" : "pointer" }}
             >
-              {COMPANY_TYPE_OPTIONS.map((o) => (
+              {companyTypeOptions(country).map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
           </label>
-          <label>
+          <label title={twFilterDisabled ? twFilterDisabledHint : undefined}>
             年資{" "}
             <select
               value={experience}
               onChange={(e) => setExperience(e.target.value)}
-              style={selectStyle}
+              disabled={twFilterDisabled}
+              style={{ ...selectStyle, opacity: twFilterDisabled ? 0.5 : 1, cursor: twFilterDisabled ? "not-allowed" : "pointer" }}
             >
               {EXPERIENCE_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
           </label>
+          <label>
+            職位搜尋{" "}
+            <input
+              type="text"
+              value={titleQuery}
+              onChange={(e) => setTitleQuery(e.target.value)}
+              placeholder={isForeign ? "e.g. Software Engineer" : "e.g. 工程師、品管"}
+              style={{ ...selectStyle, width: 200 }}
+            />
+          </label>
+          {titleQuery && (
+            <button
+              onClick={() => setTitleQuery("")}
+              style={{ ...selectStyle, padding: "6px 12px", cursor: "pointer" }}
+            >
+              清除
+            </button>
+          )}
+          {twFilterDisabled && (
+            <span style={{ fontSize: 11, color: "var(--ink-3)" }}>
+              ⓘ TW 政府資料無企業類型 / 年資維度；目前僅「職位搜尋」可用。
+            </span>
+          )}
         </div>
       )}
 
@@ -304,8 +426,8 @@ export function SalaryView() {
         </div>
       )}
 
-      {/* Empty industry state (TW only — foreign mode can run without industry) */}
-      {!isDisabled && !isForeign && !selectedIndustry && (
+      {/* Empty industry state */}
+      {!isDisabled && !selectedIndustry && (
         <div style={{ padding: 60, textAlign: "center", color: "var(--ink-3)" }}>
           請從上方選擇產業類別開始查詢。
         </div>
@@ -321,21 +443,21 @@ export function SalaryView() {
         </div>
       )}
 
-      {/* No data */}
+      {/* No data (server returned 0 rows for this country × industry) */}
       {!isDisabled && data && !data.hasData && (
         <div className="card" style={{ padding: 30, textAlign: "center" }}>
           <div style={{ fontSize: 28, marginBottom: 10 }}>📊</div>
           <div style={{ fontWeight: 600, marginBottom: 6 }}>
-            此條件下無可用資料
+            「{industryName}」在 {COUNTRIES.find((c) => c.code === country)?.label} 暫無樣本
           </div>
           <div style={{ fontSize: 13, color: "var(--ink-3)" }}>
-            {data.reason ?? "試著放寬篩選（移除企業類型或年資）。"}
+            {data.reason ?? "此產業 × 此國家目前沒有可用資料，試試其他產業或國家。（這不是 filter 造成 — filter 是進階篩選，非必填。）"}
           </div>
         </div>
       )}
 
       {/* TW gov result */}
-      {!isDisabled && data?.hasData && data.mode === "tw_gov" && data.rows && (
+      {!isDisabled && data?.hasData && data.mode === "tw_gov" && data.rows && data.summary && (
         <>
           <div className="card" style={{ padding: 22, marginBottom: 16 }}>
             <div style={{ fontSize: 11, color: "var(--ink-3)", letterSpacing: ".05em", marginBottom: 8 }}>
@@ -343,28 +465,36 @@ export function SalaryView() {
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 16 }}>
               <Stat label="加權平均月薪"
-                    value={fmtTwd((data.summary as TwSummary).weightedMonthly)} unit="元/月" />
+                    value={fmtTwd(data.summary.weightedMonthly)} unit="元/月" />
               <Stat label="加權平均年薪"
-                    value={`${(data.summary as TwSummary).weightedAnnualWan.toFixed(1)} 萬`} unit="元/年" />
+                    value={`${data.summary.weightedAnnualWan.toFixed(1)} 萬`} unit="元/年" />
               <Stat label="樣本總數"
-                    value={(data.summary as TwSummary).totalEmployees.toLocaleString("zh-TW")} unit="名員工" />
+                    value={data.summary.totalEmployees.toLocaleString("zh-TW")} unit="名員工" />
               <Stat label="職類別數"
-                    value={String((data.summary as TwSummary).occupationCount)} unit="種" />
+                    value={String(data.summary.occupationCount)} unit="種" />
             </div>
           </div>
 
           <SelfEvalInputs
             monthly={userMonthlyInput} setMonthly={setUserMonthlyInput}
             annual={userAnnualInput}   setAnnual={setUserAnnualInput}
+            experience={experience} setExperience={setExperience}
+            experienceDisabled  // TW gov 資料無年資維度
+            experienceHint="TW 政府資料無年資維度，本欄暫時無效；若要看年資分群，請切換到海外國家"
           >
             {localSelfEval && "basis" in localSelfEval && localSelfEval.basis !== "median" && (
-              <TwSelfEvalResult sev={localSelfEval as TwSelfEval} occupation={selectedOccupation} />
+              <TwSelfEvalResult
+                sev={localSelfEval as TwSelfEval}
+                occupation={selectedOccupation}
+              />
             )}
           </SelfEvalInputs>
 
           <div className="card" style={{ padding: 0 }}>
             <div style={{ padding: "14px 22px", borderBottom: "1px solid var(--line)", fontSize: 13, fontWeight: 600 }}>
-              依職類別 · 共 {data.rows.length} 種
+              依職類別 · {titleQuery.trim()
+                ? <>符合「{titleQuery}」 <span style={{ color: "var(--ink-3)", fontWeight: 400 }}>({twFilteredRows.length} / {(data.rows as TwGovRow[]).length})</span></>
+                : <>共 {(data.rows as TwGovRow[]).length} 種</>}
             </div>
             <div style={{ maxHeight: 540, overflowY: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
@@ -377,7 +507,12 @@ export function SalaryView() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.rows.slice().sort((a, b) => b.monthlyTwd - a.monthlyTwd).map((row) => (
+                  {twFilteredRows.length === 0 && (
+                    <tr><td colSpan={4} style={{ ...cellBody, textAlign: "center", color: "var(--ink-3)" }}>
+                      沒有職類別符合「{titleQuery}」
+                    </td></tr>
+                  )}
+                  {twFilteredRows.slice().sort((a, b) => b.monthlyTwd - a.monthlyTwd).map((row) => (
                     <tr
                       key={row.occupation}
                       onClick={() =>
@@ -408,41 +543,66 @@ export function SalaryView() {
         </>
       )}
 
-      {/* Adzuna result */}
-      {!isDisabled && data?.hasData && data.mode === "adzuna" && (
+      {/* Adzuna result — all numbers computed client-side from rows + filters */}
+      {!isDisabled && data?.hasData && data.mode === "adzuna" && adzunaSummary && (
         <>
           <div className="card" style={{ padding: 22, marginBottom: 16 }}>
             <div style={{ fontSize: 11, color: "var(--ink-3)", letterSpacing: ".05em", marginBottom: 8 }}>
-              {country} · {industryName ?? "全產業"}
-              {data.companyTypeLabel && ` · ${data.companyTypeLabel}`}
-              {data.experienceLabel  && ` · ${data.experienceLabel}`}
-              {" · "}樣本 {(data.summary as AdzunaSummary).sampleSize.toLocaleString("zh-TW")} 筆職缺
+              {country} · {industryName}
+              {companyType && ` · ${COMPANY_TYPE_BASE.find((o) => o.value === companyType)?.label}`}
+              {experience && ` · ${EXPERIENCE_BUCKETS[experience].label}`}
+              {titleQuery.trim() && ` · 職位「${titleQuery.trim()}」`}
+              {" · "}樣本 {adzunaSummary.sampleSize.toLocaleString("zh-TW")} / 全部 {(data.rows as AdzunaJobRow[]).length} 筆
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 16 }}>
-              <Stat label="P25（後段）"
-                    value={fmtTwd((data.summary as AdzunaSummary).p25Annual)} unit="TWD/年" />
-              <Stat label="P50（中位數）"
-                    value={fmtTwd((data.summary as AdzunaSummary).p50Annual)} unit="TWD/年" />
-              <Stat label="P75（前段）"
-                    value={fmtTwd((data.summary as AdzunaSummary).p75Annual)} unit="TWD/年" />
-              <Stat label="平均"
-                    value={fmtTwd((data.summary as AdzunaSummary).meanAnnual)} unit="TWD/年" />
-            </div>
-            <div style={{ marginTop: 12, fontSize: 11, color: "var(--ink-3)" }}>
-              月薪換算（P25 / P50 / P75 / 均）：
-              {" "}{fmtTwd((data.summary as AdzunaSummary).p25Monthly)}
-              {" · "}{fmtTwd((data.summary as AdzunaSummary).p50Monthly)}
-              {" · "}{fmtTwd((data.summary as AdzunaSummary).p75Monthly)}
-              {" · "}{fmtTwd((data.summary as AdzunaSummary).meanMonthly)}
-            </div>
+            {adzunaSummary.sampleSize === 0 ? (
+              <div style={{ padding: 24, textAlign: "center", color: "var(--ink-3)", fontSize: 13 }}>
+                目前 filter 組合無樣本；試著放寬篩選。
+              </div>
+            ) : (
+              <>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 16 }}>
+                  <Stat label="P25 (後段)"
+                        value={fmtTwd(adzunaSummary.p25Annual)} unit="TWD/年" />
+                  <Stat label="P50 (中位數)"
+                        value={fmtTwd(adzunaSummary.p50Annual)} unit="TWD/年" />
+                  <Stat label="P75 (前段)"
+                        value={fmtTwd(adzunaSummary.p75Annual)} unit="TWD/年" />
+                  <Stat label="平均"
+                        value={fmtTwd(adzunaSummary.meanAnnual)} unit="TWD/年" />
+                </div>
+                <div style={{ marginTop: 12, fontSize: 11, color: "var(--ink-3)" }}>
+                  月薪換算: {fmtTwd(monthlyFrom(adzunaSummary.p25Annual))}
+                  {" · "}{fmtTwd(monthlyFrom(adzunaSummary.p50Annual))}
+                  {" · "}{fmtTwd(monthlyFrom(adzunaSummary.p75Annual))}
+                  {" · "}{fmtTwd(monthlyFrom(adzunaSummary.meanAnnual))}
+                </div>
+              </>
+            )}
           </div>
 
           <SelfEvalInputs
             monthly={userMonthlyInput} setMonthly={setUserMonthlyInput}
             annual={userAnnualInput}   setAnnual={setUserAnnualInput}
+            experience={experience} setExperience={setExperience}
+            currency={inputCurrency} setCurrency={setInputCurrency}
+            localCurrencyCode={LOCAL_CURRENCY[country]}
+            warning={
+              (userMonthlyInput || userAnnualInput) && !experience
+                ? "⚠️ 還沒選「年資」— 你正在跟整個年資區間比較。選一個年資 bucket 才能得到精準的市場價值落點。"
+                : null
+            }
           >
             {localSelfEval && "basis" in localSelfEval && localSelfEval.basis === "median" && (
-              <AdzunaSelfEvalResult sev={localSelfEval as ForeignSelfEval} />
+              <AdzunaSelfEvalResult
+                sev={localSelfEval as ForeignSelfEval}
+                contextLabel={[
+                  country,
+                  industryName,
+                  companyType && COMPANY_TYPE_BASE.find((o) => o.value === companyType)?.label,
+                  experience  ? EXPERIENCE_BUCKETS[experience].label : "不分年資",
+                  titleQuery.trim() && `職位「${titleQuery.trim()}」`,
+                ].filter(Boolean).join(" · ")}
+              />
             )}
           </SelfEvalInputs>
         </>
@@ -456,6 +616,10 @@ export function SalaryView() {
       )}
     </div>
   );
+}
+
+function monthlyFrom(annual: number | null): number | null {
+  return annual == null ? null : Math.round(annual / 12);
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -486,27 +650,56 @@ function Stat({ label, value, unit }: { label: string; value: string; unit: stri
 }
 
 function SelfEvalInputs({
-  monthly, setMonthly, annual, setAnnual, children,
+  monthly, setMonthly, annual, setAnnual,
+  experience, setExperience, experienceDisabled, experienceHint,
+  currency, setCurrency, localCurrencyCode,
+  warning, children,
 }: {
   monthly: string; setMonthly: (s: string) => void;
   annual:  string; setAnnual:  (s: string) => void;
+  experience?: string; setExperience?: (s: string) => void;
+  experienceDisabled?: boolean;
+  experienceHint?: string;
+  currency?: string;
+  setCurrency?: (s: string) => void;
+  localCurrencyCode?: string;        // e.g. "USD"; if set, shows TWD/local toggle
+  warning?: string | null | false;
   children?: React.ReactNode;
 }) {
+  const isTwd = !currency || currency === "TWD";
+  const monthlyUnit = isTwd ? "元" : `${currency}/月`;
+  const annualUnit  = isTwd ? "萬" : `${currency}/年`;
+  const monthlyPh   = isTwd ? "e.g. 65000" : "e.g. 6000";
+  const annualPh    = isTwd ? "e.g. 100"   : "e.g. 80000";
+
   return (
     <div className="card" style={{ padding: 22, marginBottom: 16, background: "var(--bg-soft)" }}>
       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 12 }}>
-        💡 輸入你的薪資，比較自己落在哪
+        💡 輸入你的薪資 + 年資，綜合評估市場落點
       </div>
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+        {localCurrencyCode && setCurrency && (
+          <label style={{ fontSize: 12, color: "var(--ink-2)" }}>
+            幣別{" "}
+            <select
+              value={currency ?? "TWD"}
+              onChange={(e) => setCurrency(e.target.value)}
+              style={selectStyle}
+            >
+              <option value="TWD">TWD</option>
+              <option value={localCurrencyCode}>{localCurrencyCode}（在地幣）</option>
+            </select>
+          </label>
+        )}
         <label style={{ fontSize: 12, color: "var(--ink-2)" }}>
           月薪{" "}
           <input
             type="number"
             value={monthly}
             onChange={(e) => setMonthly(e.target.value)}
-            placeholder="e.g. 65000"
+            placeholder={monthlyPh}
             style={inputStyle}
-          />{" "}元
+          />{" "}{monthlyUnit}
         </label>
         <label style={{ fontSize: 12, color: "var(--ink-2)" }}>
           年薪{" "}
@@ -514,11 +707,44 @@ function SelfEvalInputs({
             type="number"
             value={annual}
             onChange={(e) => setAnnual(e.target.value)}
-            placeholder="e.g. 100"
+            placeholder={annualPh}
             style={inputStyle}
-          />{" "}萬
+          />{" "}{annualUnit}
         </label>
+        {setExperience && (
+          <label
+            style={{ fontSize: 12, color: "var(--ink-2)" }}
+            title={experienceDisabled ? experienceHint : undefined}
+          >
+            年資{" "}
+            <select
+              value={experience ?? ""}
+              onChange={(e) => setExperience(e.target.value)}
+              disabled={experienceDisabled}
+              style={{
+                ...selectStyle,
+                opacity: experienceDisabled ? 0.5 : 1,
+                cursor: experienceDisabled ? "not-allowed" : "pointer",
+              }}
+            >
+              {EXPERIENCE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
+      {experienceDisabled && experienceHint && (
+        <div style={{ marginTop: 8, fontSize: 11, color: "var(--ink-3)" }}>
+          ⓘ {experienceHint}
+        </div>
+      )}
+      {warning && (
+        <div style={{ marginTop: 10, padding: "8px 12px", background: "#fff7ed", color: "#9a3412",
+                      borderRadius: 6, fontSize: 12, lineHeight: 1.5 }}>
+          {warning}
+        </div>
+      )}
       {children}
     </div>
   );
@@ -558,7 +784,7 @@ function TwSelfEvalResult({ sev, occupation }: { sev: TwSelfEval; occupation: st
   );
 }
 
-function AdzunaSelfEvalResult({ sev }: { sev: ForeignSelfEval }) {
+function AdzunaSelfEvalResult({ sev, contextLabel }: { sev: ForeignSelfEval; contextLabel?: string }) {
   const tone  = (pct: number | null) =>
     pct == null ? "var(--ink-3)" : pct > 5 ? "#16a34a" : pct < -5 ? "#dc2626" : "var(--ink-2)";
   const arrow = (pct: number | null) =>
@@ -566,8 +792,13 @@ function AdzunaSelfEvalResult({ sev }: { sev: ForeignSelfEval }) {
 
   return (
     <div style={{ marginTop: 14, padding: 14, background: "var(--bg)", borderRadius: 8, fontSize: 13 }}>
+      {contextLabel && (
+        <div style={{ color: "var(--ink-3)", marginBottom: 4, fontSize: 11, letterSpacing: ".05em" }}>
+          篩選條件：{contextLabel}
+        </div>
+      )}
       <div style={{ color: "var(--ink-3)", marginBottom: 8 }}>
-        比較對象：中位數 P50（年薪 {fmtTwd(sev.againstAnnualTwd)} 元 / 月薪 {fmtTwd(sev.againstMonthlyTwd)} 元）
+        比較對象：此切片的中位數 P50（年薪 {fmtTwd(sev.againstAnnualTwd)} 元 / 月薪 {fmtTwd(sev.againstMonthlyTwd)} 元）
       </div>
       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 10 }}>
         {sev.userMonthly != null && (
