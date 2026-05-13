@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { signOut, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import useSWR from "swr";
@@ -17,10 +17,17 @@ interface UserProfile {
   stripeCustomerId: string | null;
 }
 
+interface Prefs {
+  minScore?: number;
+  pushEnabled?: boolean;
+  emailDigestEnabled?: boolean;
+}
+
 export function SettingsView() {
   const { data: session } = useSession();
   const router = useRouter();
   const { data: profile } = useSWR<UserProfile>("/api/user/profile", fetcher);
+  const { data: prefs, mutate: mutatePrefs } = useSWR<Prefs>("/api/preferences", fetcher);
 
   // SuperUser bypasses all plan limits → render as Max for status displays.
   const tier = ((profile?.isSuperUser ? "max" : profile?.planTier) ?? "free") as PlanTier;
@@ -32,22 +39,46 @@ export function SettingsView() {
   const insightsLimit = plan.limits.insightsPerMonth;
   const analysisLimit = plan.limits.analysisPerMonth;
 
-  // Notification prefs (local state for now)
+  // Notification prefs — persisted in DB via /api/preferences. Phase 1
+  // only stores state; actual push/email pipeline ships in Phase 2/3.
   const [minScore, setMinScore] = useState(70);
   const [emailDigest, setEmailDigest] = useState(false);
-  const [pushNew, setPushNew] = useState(true);
+  const [pushNew, setPushNew] = useState(false);
 
-  // Display prefs
+  // Hydrate from server-side prefs once they load.
+  useEffect(() => {
+    if (prefs?.minScore !== undefined) setMinScore(prefs.minScore);
+    if (prefs?.pushEnabled !== undefined) setPushNew(prefs.pushEnabled);
+    if (prefs?.emailDigestEnabled !== undefined) setEmailDigest(prefs.emailDigestEnabled);
+  }, [prefs?.minScore, prefs?.pushEnabled, prefs?.emailDigestEnabled]);
+
+  // Display prefs (not persisted yet — i18n not wired).
   const [language, setLanguage] = useState("zh-TW");
 
   // Privacy
   const [shareAnalytics, setShareAnalytics] = useState(true);
 
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
 
-  const handleSave = () => {
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await fetch("/api/preferences", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          minScore,
+          pushEnabled: pushNew,
+          emailDigestEnabled: emailDigest,
+        }),
+      });
+      await mutatePrefs();
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -129,7 +160,7 @@ export function SettingsView() {
                   管理訂閱
                 </button>
               )}
-              <button className="btn primary" style={{ fontSize: 12 }} onClick={() => router.push("/pricing")}>
+              <button className="btn primary" style={{ fontSize: 12 }} onClick={() => router.push("/pricing?from=settings")}>
                 {tier === "free" ? "🚀 升級方案" : "查看方案"}
               </button>
             </div>
@@ -158,19 +189,24 @@ export function SettingsView() {
                 <span>0 分（全部）</span>
                 <span>100 分（僅頂尖）</span>
               </div>
+              <div style={{ fontSize: 11, color: "var(--ink-4)", marginTop: 6 }}>
+                職缺流會藏起低於此分數或尚未評分的項目
+              </div>
             </div>
 
             <Toggle
               label="推播新職缺提醒"
-              sub="有符合條件的新職缺時通知我"
+              sub="有符合條件的新職缺時通知我（瀏覽器推播，即將推出）"
               checked={pushNew}
               onChange={setPushNew}
+              comingSoon
             />
             <Toggle
               label="每日 Email 摘要"
-              sub="每天寄送今日最佳職缺"
+              sub="每天寄送今日最佳職缺（即將推出）"
               checked={emailDigest}
               onChange={setEmailDigest}
+              comingSoon
             />
           </div>
         </div>
@@ -179,16 +215,26 @@ export function SettingsView() {
         <div className="card" style={{ padding: 18 }}>
           <div className="eyebrow" style={{ marginBottom: 14 }}>顯示語言</div>
           <div style={{ display: "flex", gap: 8 }}>
-            {[["zh-TW", "繁體中文"], ["en", "English"]].map(([val, label]) => (
-              <button
-                key={val}
-                onClick={() => setLanguage(val)}
-                className={`btn${language === val ? " primary" : ""}`}
-                style={{ fontSize: 13 }}
-              >
-                {label}
-              </button>
-            ))}
+            <button
+              onClick={() => setLanguage("zh-TW")}
+              className={`btn${language === "zh-TW" ? " primary" : ""}`}
+              style={{ fontSize: 13 }}
+            >
+              繁體中文
+            </button>
+            <button
+              disabled
+              title="敬請期待"
+              className="btn"
+              style={{
+                fontSize: 13,
+                opacity: 0.5,
+                cursor: "not-allowed",
+                color: "var(--ink-3)",
+              }}
+            >
+              English（敬請期待）
+            </button>
           </div>
         </div>
 
@@ -203,19 +249,30 @@ export function SettingsView() {
           />
         </div>
 
-        <button className="btn primary" onClick={handleSave} style={{ alignSelf: "flex-start" }}>
-          {saved ? "已儲存 ✓" : "儲存設定"}
+        <button
+          className="btn primary"
+          onClick={handleSave}
+          disabled={saving}
+          style={{ alignSelf: "stretch", textAlign: "center", justifyContent: "center" }}
+        >
+          {saving ? "儲存中…" : saved ? "已儲存 ✓" : "儲存設定"}
         </button>
       </div>
     </div>
   );
 }
 
-function Toggle({ label, sub, checked, onChange }: {
-  label: string; sub?: string; checked: boolean; onChange: (v: boolean) => void;
+function Toggle({
+  label, sub, checked, onChange, comingSoon = false,
+}: {
+  label: string;
+  sub?: string;
+  checked: boolean;
+  onChange: (v: boolean) => void;
+  comingSoon?: boolean;
 }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, opacity: comingSoon ? 0.5 : 1 }}>
       <div>
         <div style={{ fontSize: 13, fontWeight: 500 }}>{label}</div>
         {sub && <div style={{ fontSize: 11, color: "var(--ink-3)", marginTop: 2 }}>{sub}</div>}
@@ -223,9 +280,12 @@ function Toggle({ label, sub, checked, onChange }: {
       <button
         role="switch"
         aria-checked={checked}
-        onClick={() => onChange(!checked)}
+        disabled={comingSoon}
+        title={comingSoon ? "敬請期待" : undefined}
+        onClick={() => !comingSoon && onChange(!checked)}
         style={{
-          width: 44, height: 24, borderRadius: 12, border: "none", cursor: "pointer",
+          width: 44, height: 24, borderRadius: 12, border: "none",
+          cursor: comingSoon ? "not-allowed" : "pointer",
           background: checked ? "var(--primary)" : "var(--line)",
           position: "relative", flexShrink: 0, transition: "background .2s",
         }}

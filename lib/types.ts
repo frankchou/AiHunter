@@ -150,4 +150,6 @@ export interface JobFilters {
   sort?: "score" | "date" | "salary";
   page?: number;
   pageSize?: number;
+  // 0..100. Hide jobs scoring below this AND unscored. From Preference.minScore.
+  minScore?: number;
 }

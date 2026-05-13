@@ -24,6 +24,7 @@ export async function GET(req: NextRequest) {
     sort: (sp.get("sort") as JobFilters["sort"]) ?? "score",
     page: sp.get("page") ? Number(sp.get("page")) : 1,
     pageSize: sp.get("pageSize") ? Number(sp.get("pageSize")) : 10,
+    minScore: sp.get("minScore") ? Number(sp.get("minScore")) : undefined,
   };
 
   try {
@@ -43,6 +44,13 @@ export async function GET(req: NextRequest) {
     if (filters.yearsMin) where.yearsMax = { gte: filters.yearsMin };
     if (filters.yearsMax) where.yearsMin = { lte: filters.yearsMax };
     if (filters.titles) where.title = { contains: filters.titles, mode: "insensitive" };
+    // minScore (0..100) → hide score below threshold AND unscored.
+    // Job.score is 0..1, threshold is 0..100, so divide. Prisma's `gte`
+    // on a nullable column auto-excludes nulls, which is the strict
+    // "藏 unscored" behaviour we want.
+    if (filters.minScore !== undefined && filters.minScore > 0) {
+      where.score = { gte: filters.minScore / 100 };
+    }
     const companyFilter = sp.get("company");
     if (companyFilter) where.company = { contains: companyFilter, mode: "insensitive" };
     if (filters.q) {

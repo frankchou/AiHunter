@@ -120,6 +120,15 @@ model Preference {
   remote       String[]
   languages    String[]
   titles       String   @default("")
+  // Job feed filter: hide jobs with score < minScore/100 OR unscored.
+  // 0..100, default 70. Wired in SettingsView slider → JobFeed filter.
+  minScore           Int      @default(70)
+  // Notification toggles. UI exists ("即將推出"), real push/email
+  // pipeline ships in Phase 2 (email via Resend + cron) + Phase 3
+  // (Web Push API + Service Worker). Persisted so when those ship
+  // we already have user preferences.
+  pushEnabled        Boolean  @default(false)
+  emailDigestEnabled Boolean  @default(false)
   updatedAt    DateTime @updatedAt
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

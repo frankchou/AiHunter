@@ -21,8 +21,8 @@ interface SubInfo {
 interface Invoice {
   id: string;
   number: string | null;
-  created: number;     // unix seconds
-  total: number;       // cents
+  created: number;
+  total: number;
   currency: string;
   status: string | null;
   hostedUrl: string | null;
@@ -32,21 +32,26 @@ interface Invoice {
 const TIER_LABEL: Record<string, string> = { free: "Free", pro: "Pro", max: "Max" };
 
 export function BillingView() {
-  const { data: sub, mutate: mutateSub } = useSWR<SubInfo>("/api/stripe/subscription", fetcher);
+  // Pull subscription via the new LemonSqueezy-backed endpoint. It also
+  // applies super-user remap so we don't repeat the logic here.
+  const { data: sub, mutate: mutateSub } = useSWR<SubInfo>("/api/payments/subscription", fetcher);
+  // Invoices remain on Stripe path for now — LemonSqueezy invoice
+  // listing is a separate follow-up commit. Stripe users (none yet)
+  // will see invoices; LemonSqueezy users will see empty list.
   const { data: invData } = useSWR<{ invoices: Invoice[] }>("/api/stripe/invoices", fetcher);
 
   const [modal, setModal] = useState<PlanChangeKind | null>(null);
-  const [updatingPM, setUpdatingPM] = useState(false);
+  const [openingPortal, setOpeningPortal] = useState(false);
 
-  const updatePaymentMethod = async () => {
-    setUpdatingPM(true);
+  const openPortal = async () => {
+    setOpeningPortal(true);
     try {
-      const r = await fetch("/api/stripe/portal", { method: "POST" });
+      const r = await fetch("/api/payments/portal");
       const { url, error } = await r.json();
       if (error) { alert(error); return; }
       if (url) window.location.href = url;
     } finally {
-      setUpdatingPM(false);
+      setOpeningPortal(false);
     }
   };
 
@@ -62,6 +67,25 @@ export function BillingView() {
   const tier = sub?.planTier ?? "free";
   const isPaid = tier === "pro" || tier === "max";
 
+  // Super user: no subscription to manage. Show banner only.
+  if (sub?.isSuperUser) {
+    return (
+      <div className="app-content">
+        <div className="section-h">
+          <Link href="/settings" style={{ fontSize: 12, color: "var(--ink-3)", marginRight: 10 }}>← 設定</Link>
+          <h3 style={{ display: "inline" }}>管理訂閱</h3>
+        </div>
+        <div className="card" style={{ padding: 18, background: "oklch(95% .04 235)", border: "1px solid oklch(85% .06 235)" }}>
+          <div style={{ fontSize: 15, fontWeight: 600, marginBottom: 6 }}>你是 Super User</div>
+          <div style={{ fontSize: 13, color: "var(--ink-2)", lineHeight: 1.6 }}>
+            擁有 Max 所有功能、無需訂閱可管理。<br />
+            如需切換為一般使用者，請聯絡管理員把資料庫 `isSuperUser` 設為 `false`。
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app-content">
       <div className="section-h">
@@ -69,12 +93,6 @@ export function BillingView() {
         <h3 style={{ display: "inline" }}>管理訂閱</h3>
         <span className="sub">付款方式 · 帳單紀錄 · 方案變更</span>
       </div>
-
-      {sub?.isSuperUser && (
-        <div className="card" style={{ padding: 14, marginBottom: 16, fontSize: 13, color: "var(--ink-2)", background: "oklch(95% .04 235)", border: "1px solid oklch(85% .06 235)" }}>
-          你是 Super User — 不受方案限制，無 Stripe 訂閱可管理。
-        </div>
-      )}
 
       {/* Plan summary */}
       <div className="card" style={{ padding: 18, marginBottom: 16 }}>
@@ -96,7 +114,7 @@ export function BillingView() {
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {tier === "max" && !sub?.pendingPlanTier && (
                 <button className="btn" onClick={() => setModal("downgrade")} style={{ fontSize: 13 }}>
-                  降級為 Pro
+                  更改方案
                 </button>
               )}
               {!sub?.pendingPlanTier && (
@@ -105,7 +123,7 @@ export function BillingView() {
                   onClick={() => setModal("cancel")}
                   style={{ fontSize: 13, color: "oklch(45% .15 25)", borderColor: "oklch(75% .12 25)" }}
                 >
-                  取消訂閱
+                  更改方案
                 </button>
               )}
             </div>
@@ -133,10 +151,13 @@ export function BillingView() {
                 ? <>💳 {sub.cardBrand?.toUpperCase()} •••• {sub.cardLast4}</>
                 : <span style={{ color: "var(--ink-3)" }}>尚未設定信用卡</span>}
             </div>
+            <div style={{ fontSize: 11, color: "var(--ink-4)", marginTop: 4 }}>
+              卡片資料由 LemonSqueezy 儲存（PCI 合規），更新時會即時驗證
+            </div>
           </div>
           {sub?.hasSubscription && (
-            <button className="btn" onClick={updatePaymentMethod} disabled={updatingPM} style={{ fontSize: 13 }}>
-              {updatingPM ? "前往中…" : "更新"}
+            <button className="btn" onClick={openPortal} disabled={openingPortal} style={{ fontSize: 13 }}>
+              {openingPortal ? "前往中…" : "更換卡片"}
             </button>
           )}
         </div>

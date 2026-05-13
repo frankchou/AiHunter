@@ -7,7 +7,7 @@ export const metadata = { title: "職缺流 — AI Hunter" };
 export default async function FeedPage() {
   const session = await getServerSession(authOptions);
 
-  let initialPrefs: { locations?: string[]; industries?: string[] } = {};
+  let initialPrefs: { locations?: string[]; industries?: string[]; minScore?: number } = {};
   try {
     const { prisma } = await import("@/lib/prisma");
     if (session?.user?.id) {
@@ -16,6 +16,7 @@ export default async function FeedPage() {
         initialPrefs = {
           locations: prefs.locations as string[],
           industries: prefs.industries as string[],
+          minScore:  prefs.minScore,
         };
       }
     }

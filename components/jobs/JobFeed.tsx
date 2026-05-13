@@ -9,13 +9,17 @@ import type { Job, JobFilters, JobListResponse } from "@/lib/types";
 const fetcher = (url: string) => fetch(url).then((r) => r.json());
 
 interface Props {
-  initialPrefs?: { locations?: string[]; industries?: string[] };
+  initialPrefs?: { locations?: string[]; industries?: string[]; minScore?: number };
 }
 
 export function JobFeed({ initialPrefs }: Props) {
   const [filters, setFilters] = useState<JobFilters>({
     sort: "score", page: 1, pageSize: 10,
     countries: [], remote: [], industries: [], sources: [], culture: [],
+    // Pulled from Preference.minScore (server-side prop). Changes via
+    // SettingsView require a feed refresh to take effect — we read from
+    // prop, not via SWR, to keep this component simple.
+    minScore: initialPrefs?.minScore ?? 70,
   });
   const [showFilters, setShowFilters] = useState(false);
   const [q, setQ] = useState("");
