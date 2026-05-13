@@ -19,7 +19,7 @@ export function PricingView({ currentTier, usageSummary }: Props) {
   const handleUpgrade = async (tier: "pro" | "max") => {
     setLoading(tier);
     try {
-      const res = await fetch("/api/stripe/checkout", {
+      const res = await fetch("/api/payments/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ tier }),

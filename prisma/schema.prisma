@@ -58,6 +58,13 @@ model User {
   stripeCustomerId     String?      @unique
   stripeSubscriptionId String?      @unique
   stripeScheduleId     String?      @unique             // active subscription schedule (for period-end downgrade)
+  // LemonSqueezy mirrors of the above. Stripe code left in place but
+  // unused for new subscriptions — see app/api/payments/* + /api/stripe/*.
+  lsCustomerId         String?      @unique             // LemonSqueezy customer ID
+  lsSubscriptionId     String?      @unique             // LemonSqueezy subscription ID
+  lsVariantId          String?                          // current variant ID (Pro or Max)
+  lsRenewsAt           DateTime?                        // next renewal timestamp from LemonSqueezy
+  lsEndsAt             DateTime?                        // when subscription ends (set when cancelled)
   pendingPlanTier      String?                          // null=no change pending; "pro" / "free" if user scheduled a downgrade/cancel
   pendingPlanAt        DateTime?                        // when pendingPlanTier takes effect (current period end)
   usageMonth           String?                          // "2026-05", resets counters when month changes
