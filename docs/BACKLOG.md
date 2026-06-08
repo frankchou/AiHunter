@@ -95,6 +95,9 @@
 
 - [ ] **Done** · [ ] **Verified** — **#10 Phase 1: 純路徑 MVP**
   - 🎯 P2 · ⏱ 8h · 📅 上線後留存穩定後（2026-07?） · 👤 Claude impl → Frank verify
+  - **Pre-work（啟動前 Frank 要決定）**：
+    - [ ] (a) **先寫 design doc** — Claude 把架構 + AI prompt + DB schema + UI flow 寫成 `docs/CAREER_ROADMAP_DESIGN.md` 過目，過目後再動 code（~2h）
+    - [ ] (b) **直接開做** — 接受邊做邊調整、scope 可能會在中途被你 challenge
   - Scope：`CareerRoadmap` model + AI prompt + 設目標 wizard + timeline UI + JobFeed 對齊路徑加分（Max only）+ `consumeUsage("roadmap")` gate
   - 驗證：設個假目標跑一次、看 AI 輸出合理
 
@@ -162,3 +165,4 @@
 - 新增 item → 加在對應 phase、給 priority + estimate + target start
 - 改變優先序 → 移動位置 + 更新 target start
 - 已完成的 item → 移到「近期已完成」section（保留歷史）
+- **複雜 item 啟動前**（P2 以上 + estimate > 4h、或新功能）→ Claude 在該 item 下提**「先寫 design doc」vs「直接做」**兩個選項，Frank 勾完才開工，避免 scope 失控
